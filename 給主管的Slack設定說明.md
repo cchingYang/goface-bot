@@ -54,9 +54,7 @@
 
 ---
 
-## 步驟五｜開啟 Event Subscriptions（Ching 部署後再做）
-
-> ⚠️ 這個步驟需要等 Ching 部署完 Vercel，取得網址後再回來設定。
+## 步驟五｜開啟 Event Subscriptions
 
 1. 左側選單點 **「Event Subscriptions」**
 2. 右上角 toggle 打開 **「Enable Events」**
