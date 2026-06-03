@@ -1,0 +1,19 @@
+{
+  "name": "goface-bot",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "vercel dev"
+  },
+  "dependencies": {
+    "@octokit/rest": "^20.0.0",
+    "@slack/web-api": "^7.0.0",
+    "@vercel/node": "^4.0.0",
+    "openai": "^4.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20",
+    "dotenv": "^17.4.2",
+    "typescript": "^5"
+  }
+}
