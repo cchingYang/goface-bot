@@ -62,7 +62,7 @@
 2. 右上角 toggle 打開 **「Enable Events」**
 3. 在 **Request URL** 填入 Ching 提供的網址：
    ```
-   https://[your-vercel-app].vercel.app/api/slack/events
+   https://goface-bot.vercel.app/api/slack/events
    ```
 4. 等出現 ✅ **Verified** 字樣
 5. 往下找 **「Subscribe to bot events」**
@@ -74,7 +74,7 @@
 
 ## 步驟六｜將 Bot 加入指定頻道
 
-1. 在 Slack 打開你要啟用 goface-bot 的頻道
+1. 打開以下指定頻道：https://astracloud.slack.com/archives/C040Q9F6D37
 2. 點頻道名稱（上方）→ **「整合」** → **「加入 App」**
 3. 搜尋 `goface-bot`，加入
 
