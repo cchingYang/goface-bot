@@ -70,7 +70,7 @@ async function processInBackground(event: any) {
           slackUser,
         })
         await replyToSlack(channel, ts,
-          `✅ 修改完成，PR 已建立！\n\n*PR #${prNumber}*\n${prUrl}\n\n請 review 後 merge。`)
+          `✅ 修改完成，PR 已建立！\n\n*PR #${prNumber}*\n${prUrl}\n\n請 <@U0819C25K51> review 後 merge。`)
         break
       }
 
