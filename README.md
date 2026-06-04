@@ -32,7 +32,7 @@ goface-bot/
 ├── verify.ts          # 驗證請求來自 Slack
 ├── vercel.json        # Vercel 設定
 ├── .env.example       # 環境變數範本
-└── 給主管的Slack設定說明.md
+└── Slack App 設定說明.md
 ```
 
 ## 環境變數
