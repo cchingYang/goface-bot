@@ -71,36 +71,30 @@ async function findSrcFile(url: string, original: string): Promise<{ path: strin
   return null
 }
 
-export async function createSEOPullRequest(params: {
+export interface Change {
   url: string
   original: string
   replacement: string
+}
+
+// 將同一 URL 的所有修改合併成一個 PR
+export async function createSEOPullRequest(params: {
+  changes: Change[]
   slackUser: string
 }): Promise<{ prUrl: string; prNumber: number }> {
-  const { url, original, replacement, slackUser } = params
-  const distPath = urlToDistPath(url)
+  const { changes, slackUser } = params
 
-  // 1. 找 src 檔案（html 或 lang json）
-  const srcFile = await findSrcFile(url, original)
-  if (!srcFile) {
-    throw new Error(`在 src 中找不到原文，請確認貼上的文字與檔案完全一致（包含空格與標點）。`)
+  // 依 URL 分組
+  const byUrl = new Map<string, Change[]>()
+  for (const change of changes) {
+    if (!byUrl.has(change.url)) byUrl.set(change.url, [])
+    byUrl.get(change.url)!.push(change)
   }
 
-  // 2. 取得 dist 檔案
-  const distFile = await fetchFile(distPath)
-  if (!distFile) {
-    throw new Error(`找不到 dist 檔案：${distPath}`)
-  }
-  if (!distFile.content.includes(original)) {
-    throw new Error(
-      `在 \`${distPath}\` 中找不到原文，src 與 dist 可能不同步，請先在本機執行 gulp dev 後再試。`
-    )
-  }
-
-  // 3. 建立新 branch
+  // 建立 branch
   const timestamp = Date.now()
-  const fileName = distPath.split('/').pop()?.replace('.html', '') || 'file'
-  const branchName = `seo/update-${fileName}-${timestamp}`
+  const fileNames = [...byUrl.keys()].map(u => new URL(u).pathname.split('/').pop()?.replace('.html', '')).join('-')
+  const branchName = `seo/update-${fileNames}-${timestamp}`
 
   const { data: refData } = await octokit.git.getRef({
     owner: REPO_OWNER,
@@ -115,83 +109,111 @@ export async function createSEOPullRequest(params: {
     sha: refData.object.sha,
   })
 
-  // 4. Commit src（html 或 lang json）
-  await octokit.repos.createOrUpdateFileContents({
-    owner: REPO_OWNER,
-    repo: REPO_NAME,
-    path: srcFile.path,
-    message: `seo: update content in ${srcFile.path.split('/').pop()}`,
-    content: Buffer.from(srcFile.content.replace(original, replacement)).toString('base64'),
-    sha: srcFile.sha,
-    branch: branchName,
-  })
+  const prBodySections: string[] = []
+  const modifiedSrcPaths: string[] = []
+  const modifiedDistPaths: string[] = []
 
-  // 5. Commit dist
-  await octokit.repos.createOrUpdateFileContents({
-    owner: REPO_OWNER,
-    repo: REPO_NAME,
-    path: distPath,
-    message: `seo: update dist for ${fileName}.html`,
-    content: Buffer.from(distFile.content.replace(original, replacement)).toString('base64'),
-    sha: distFile.sha,
-    branch: branchName,
-  })
+  // 依每個 URL 處理所有修改
+  for (const [url, urlChanges] of byUrl) {
+    const distPath = urlToDistPath(url)
 
-  // 6. 更新 sitemap lastmod
-  const sitemapFile = await fetchFile('dist/sitemap.xml')
+    // 取得 src 和 dist（先用第一筆 change 定位 src，後續累積替換）
+    let srcFile: { path: string; content: string; sha: string } | null = null
+    for (const { original } of urlChanges) {
+      const found = await findSrcFile(url, original)
+      if (found) { srcFile = found; break }
+    }
+    if (!srcFile) throw new Error(`在 src 中找不到對應檔案：${url}`)
+
+    const distFile = await fetchFile(distPath)
+    if (!distFile) throw new Error(`找不到 dist 檔案：${distPath}`)
+
+    // 套用所有替換
+    let srcContent = srcFile.content
+    let distContent = distFile.content
+    for (const { original, replacement } of urlChanges) {
+      if (!srcContent.includes(original) && !distContent.includes(original)) {
+        throw new Error(`找不到原文「${original}」，請確認文字與頁面內容完全一致。`)
+      }
+      srcContent = srcContent.replace(original, replacement)
+      distContent = distContent.replace(original, replacement)
+    }
+
+    // Commit src
+    await octokit.repos.createOrUpdateFileContents({
+      owner: REPO_OWNER, repo: REPO_NAME,
+      path: srcFile.path,
+      message: `seo: update content in ${srcFile.path.split('/').pop()}`,
+      content: Buffer.from(srcContent).toString('base64'),
+      sha: srcFile.sha,
+      branch: branchName,
+    })
+
+    // Commit dist
+    await octokit.repos.createOrUpdateFileContents({
+      owner: REPO_OWNER, repo: REPO_NAME,
+      path: distPath,
+      message: `seo: update dist for ${distPath.split('/').pop()}`,
+      content: Buffer.from(distContent).toString('base64'),
+      sha: distFile.sha,
+      branch: branchName,
+    })
+
+    modifiedSrcPaths.push(srcFile.path)
+    modifiedDistPaths.push(distPath)
+
+    // PR body
+    const changeLines = urlChanges.map(({ original, replacement }) =>
+      `> 原文：${original}\n> 改文：${replacement}`
+    ).join('\n\n')
+    prBodySections.push(`**${url}**\n${changeLines}`)
+  }
+
+  // 更新 sitemap（每個 URL 都更新）
+  let sitemapFile = await fetchFile('dist/sitemap.xml')
   if (sitemapFile) {
-    const pageUrl = new URL(url)
+    let sitemapContent = sitemapFile.content
     const newLastmod = new Date().toISOString()
-    // 先試完整 URL，找不到再試 trailing slash（index.html 的 sitemap 有時用 /）
-    const candidateUrls = [
-      `${pageUrl.origin}${pageUrl.pathname}`,
-      `${pageUrl.origin}${pageUrl.pathname.replace(/\/index\.html$/, '/')}`,
-    ]
-    let updatedSitemap = sitemapFile.content
-    for (const locUrl of candidateUrls) {
-      const replaced = sitemapFile.content.replace(
-        new RegExp(`(<loc>${escapeRegex(locUrl)}</loc>\\s*<lastmod>)[^<]*(</lastmod>)`, 's'),
-        `$1${newLastmod}$2`
-      )
-      if (replaced !== sitemapFile.content) {
-        updatedSitemap = replaced
-        break
+    for (const url of byUrl.keys()) {
+      const pageUrl = new URL(url)
+      const candidateUrls = [
+        `${pageUrl.origin}${pageUrl.pathname}`,
+        `${pageUrl.origin}${pageUrl.pathname.replace(/\/index\.html$/, '/')}`,
+      ]
+      for (const locUrl of candidateUrls) {
+        const replaced = sitemapContent.replace(
+          new RegExp(`(<loc>${escapeRegex(locUrl)}</loc>\\s*<lastmod>)[^<]*(</lastmod>)`, 's'),
+          `$1${newLastmod}$2`
+        )
+        if (replaced !== sitemapContent) { sitemapContent = replaced; break }
       }
     }
-    if (updatedSitemap !== sitemapFile.content) {
+    if (sitemapContent !== sitemapFile.content) {
       await octokit.repos.createOrUpdateFileContents({
-        owner: REPO_OWNER,
-        repo: REPO_NAME,
+        owner: REPO_OWNER, repo: REPO_NAME,
         path: 'dist/sitemap.xml',
-        message: `seo: update sitemap lastmod for ${fileName}.html`,
-        content: Buffer.from(updatedSitemap).toString('base64'),
+        message: `seo: update sitemap lastmod`,
+        content: Buffer.from(sitemapContent).toString('base64'),
         sha: sitemapFile.sha,
         branch: branchName,
       })
     }
   }
 
-  // 7. 開 PR
+  // 開 PR
   const { data: pr } = await octokit.pulls.create({
     owner: REPO_OWNER,
     repo: REPO_NAME,
-    title: `[SEO] ${fileName}.html 內容優化`,
+    title: `[SEO] 內容優化 ${[...byUrl.keys()].map(u => new URL(u).pathname.split('/').pop()).join(', ')}`,
     body: `## SEO 內容更新
 
-**來源頁面**
-${url}
-
 **修改檔案**
-- \`${srcFile.path}\`
-- \`${distPath}\`
+${modifiedSrcPaths.map(p => `- \`${p}\``).join('\n')}
+${modifiedDistPaths.map(p => `- \`${p}\``).join('\n')}
 
 **修改內容**
 
-> 原文
-${original}
-
-> 改文
-${replacement}
+${prBodySections.join('\n\n---\n\n')}
 
 ---
 *此 PR 由 goface-bot 自動建立，由 @${slackUser} 發起*`,
@@ -199,8 +221,5 @@ ${replacement}
     base: BASE_BRANCH,
   })
 
-  return {
-    prUrl: pr.html_url,
-    prNumber: pr.number,
-  }
+  return { prUrl: pr.html_url, prNumber: pr.number }
 }

@@ -68,15 +68,13 @@ async function processInBackground(event: any) {
     switch (parsed.taskType) {
 
       case 'update_file': {
-        if (!parsed.url || !parsed.original || !parsed.replacement) {
+        if (!parsed.changes || parsed.changes.length === 0) {
           await replyToSlack(channel, ts,
             '⚠️ 修改檔案需要提供：\n• 網址\n• 原始文字\n• 修改後的文字\n\n例：幫我改 https://goface.me/blog/b29.html 的「原文」改成「新文字」')
           return
         }
         const { prUrl, prNumber } = await createSEOPullRequest({
-          url: parsed.url,
-          original: parsed.original,
-          replacement: parsed.replacement,
+          changes: parsed.changes,
           slackUser,
         })
         await replyToSlack(channel, ts,
