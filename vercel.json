@@ -4,5 +4,6 @@
       "memory": 512,
       "maxDuration": 30
     }
-  }
+  },
+  "ignoreCommand": "git diff HEAD~1 --name-only | grep -qE '\\.(ts|json)$' && exit 1 || exit 0"
 }
