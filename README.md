@@ -41,8 +41,8 @@ goface-bot/
 
 | 變數 | 說明 |
 |------|------|
-| `SLACK_BOT_TOKEN` | Slack Bot User OAuth Token（主管提供） |
-| `SLACK_SIGNING_SECRET` | Slack App Signing Secret（主管提供） |
+| `SLACK_BOT_TOKEN` | Slack Bot User OAuth Token（參考 Slack App 設定說明.md） |
+| `SLACK_SIGNING_SECRET` | Slack App Signing Secret（參考 Slack App 設定說明.md） |
 | `GITHUB_TOKEN` | GitHub Fine-grained PAT |
 | `GITHUB_REPO_OWNER` | repo 擁有者，e.g. `astracloud` |
 | `GITHUB_REPO_NAME` | repo 名稱，e.g. `goface.me` |
@@ -68,10 +68,7 @@ goface-bot/
 
 1. 將此 repo 連結到 Vercel
 2. 在 Vercel > Settings > Environment Variables 填入所有環境變數
-3. 部署後將網址提供給主管填入 Slack App Event Subscriptions：
-   ```
-   https://goface-bot.vercel.app/api/slack/events
-   ```
+3. 依照 `Slack App 設定說明.md` 完成 Slack App 設定
 
 ## 本機測試
 
