@@ -39,9 +39,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(200).json({ ok: true })
   }
 
-  // 立刻回 200 給 Slack，背景處理
-  res.status(200).json({ ok: true })
-  processInBackground(event)
+  // 先處理完再回 200（serverless function 回應後即終止，不能用背景任務）
+  await processInBackground(event)
+  return res.status(200).json({ ok: true })
 }
 
 async function processInBackground(event: any) {
