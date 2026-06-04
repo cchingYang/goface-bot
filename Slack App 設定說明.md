@@ -1,13 +1,4 @@
-# goface-bot — Slack App 設定說明（給主管）
-
-> 這份說明只需要主管操作一次，大約 10 分鐘。
-> 完成後請將取得的兩組資訊傳給 Ching。
-
----
-
-## 你需要做什麼
-
-建立一個 Slack App，讓 goface-bot 可以監聽頻道訊息並自動回覆。
+# goface-bot — Slack App 設定說明
 
 ---
 
@@ -41,7 +32,7 @@
 3. 點 **「允許」**
 4. 安裝完成後，頁面會出現一組 **Bot User OAuth Token**
    - 格式為 `xoxb-...` 開頭
-   - ⭐ **請複製這組 token，傳給 Ching**
+   - 複製後填入 Vercel > Settings > Environment Variables > `SLACK_BOT_TOKEN`
 
 ---
 
@@ -50,7 +41,7 @@
 1. 左側選單點 **「Basic Information」**
 2. 找到 **「App Credentials」** 區塊
 3. 點 **「Signing Secret」** 旁邊的 Show
-4. ⭐ **請複製這組 secret，傳給 Ching**
+4. 複製後填入 Vercel > Settings > Environment Variables > `SLACK_SIGNING_SECRET`
 
 ---
 
@@ -58,7 +49,7 @@
 
 1. 左側選單點 **「Event Subscriptions」**
 2. 右上角 toggle 打開 **「Enable Events」**
-3. 在 **Request URL** 填入 Ching 提供的網址：
+3. 在 **Request URL** 填入：
    ```
    https://goface-bot.vercel.app/api/slack/events
    ```
@@ -75,21 +66,3 @@
 1. 打開以下指定頻道：https://astracloud.slack.com/archives/C040Q9F6D37
 2. 點頻道名稱（上方）→ **「整合」** → **「加入 App」**
 3. 搜尋 `goface-bot`，加入
-
----
-
-## 完成！
-
-設定完成後，同事只需要在頻道中輸入：
-
-```
-@goface-bot SEO優化，幫我優化首頁標題，關鍵字是「人臉辨識門禁」
-```
-
-Bot 就會自動在 thread 回覆 SEO 優化建議。
-
----
-
-## 如有問題
-
-請聯繫 Ching。
