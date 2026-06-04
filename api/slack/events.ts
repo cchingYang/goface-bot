@@ -18,6 +18,9 @@ import { verifySlackSignature } from '../../verify'
 // Vercel 預設會 parse body，關掉讓我們自己處理 raw body（Slack 簽名驗證需要）
 export const config = { api: { bodyParser: false } }
 
+// 防止 Slack retry 重複觸發（記住最近處理過的 event_id）
+const processedEvents = new Set<string>()
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST') return res.status(405).end()
 
@@ -38,6 +41,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (!event || event.type !== 'app_mention') {
     return res.status(200).json({ ok: true })
   }
+
+  // 過濾 Slack retry 重複事件
+  const eventId = body.event_id
+  if (eventId && processedEvents.has(eventId)) {
+    return res.status(200).json({ ok: true })
+  }
+  if (eventId) processedEvents.add(eventId)
 
   // 先處理完再回 200（serverless function 回應後即終止，不能用背景任務）
   await processInBackground(event)
