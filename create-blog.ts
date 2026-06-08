@@ -125,10 +125,11 @@ function parseDocMeta(docContent: string): { metaTitle?: string; metaDescription
     .split(/\r?\n/)
     .filter(line => line.toLowerCase().includes('alt='))
     .map(line => {
-      // 移除 alt= 前的部分，取引號內文字
-      const after = line.replace(/^.*alt=/i, '')
-      // 移除各種引號（全形、半形）取中間文字
-      return after.replace(/^["""'\s]+/, '').replace(/["""'\s]+\/?>\s*$/, '').trim()
+      // 移除 alt= 前的部分
+      const after = line.replace(/^.*alt=/i, ‘’)
+      // 跳過開頭所有非中英文字元（各種引號、空白），取到 /> 之前
+      const match = after.match(/([A-Za-z一-鿿][\s\S]*?)[\s”””‘-‟]*\s*\/?>\s*$/)
+      return match ? match[1].trim() : ‘’
     })
     .filter(Boolean)
 
