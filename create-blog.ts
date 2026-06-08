@@ -115,31 +115,30 @@ function parseHashtags(docContent: string): Array<{ ct: string; blog: string }> 
   return result
 }
 
-// 從 Doc 內容直接 parse 結構化欄位
-function parseDocMeta(docContent: string): { metaTitle?: string; metaDescription?: string; h1?: string; imageAlts: string[] } {
-  const metaTitleMatch = docContent.match(/Meta Title[：:]\s*(.+)/i)
-  const metaDescMatch = docContent.match(/Meta Description[：:]\s*([\s\S]+?)(?=\n\n|\nH1|\nalt=)/i)
-  const h1Match = docContent.match(/H1\s*(.+)/i)
-  // Doc 格式：每行 alt=" 描述文字" />，直接 split 行找含 alt= 的行
-  const imageAlts = docContent
-    .split(/\r?\n/)
-    .filter(line => line.toLowerCase().includes('alt='))
-    .map(line => {
-      // 移除 alt= 前的部分
-      const after = line.replace(/^.*alt=/i, '')
-      // 跳過開頭所有非中英文字元（各種引號、空白），取到 /> 之前
-      const match = after.match(/([A-Za-z\u4e00-\u9fff][\s\S]*?)[\s\u201c\u201d"']+\s*\/?>\s*$/)
-      return match ? match[1].trim() : ''
-    })
-    .filter(Boolean)
-
+// 用 GPT-4o 從 Doc 抽取結構化欄位（不用 regex，避免全形/半形問題）
+async function parseDocMeta(docContent: string): Promise<{ metaTitle?: string; metaDescription?: string; h1?: string; imageAlts: string[] }> {
+  const response = await openai.chat.completions.create({
+    model: 'gpt-4o',
+    max_tokens: 800,
+    response_format: { type: 'json_object' },
+    messages: [
+      {
+        role: 'system',
+        content: `從文章內容中找出以下欄位，回傳 JSON：\n- metaTitle：Meta Title 欄位的文字\n- metaDescription：Meta Description 欄位的文字\n- h1：文章主標題（H1）\n- imageAlts：所有圖片 alt 描述的陣列（依出現順序）\n\n欄位名稱可能是全形或半形冒號，大小寫不拘。找不到就回傳 null 或空陣列。\n只回傳 JSON，格式：{"metaTitle":"...","metaDescription":"...","h1":"...","imageAlts":["...","..."]}`
+      },
+      { role: 'user', content: docContent },
+    ],
+  })
+  const raw = response.choices[0]?.message?.content || '{}'
+  const parsed = JSON.parse(raw)
   return {
-    metaTitle: metaTitleMatch?.[1]?.trim(),
-    metaDescription: metaDescMatch?.[1]?.trim().replace(/\n/g, ''),
-    h1: h1Match?.[1]?.trim(),
-    imageAlts,
+    metaTitle: parsed.metaTitle || undefined,
+    metaDescription: parsed.metaDescription || undefined,
+    h1: parsed.h1 || undefined,
+    imageAlts: Array.isArray(parsed.imageAlts) ? parsed.imageAlts : [],
   }
 }
+
 
 // 用 GPT-4o 生成 blog.html 用的 post-item HTML 片段
 async function generatePostItem(params: {
@@ -225,7 +224,7 @@ async function generateBlogHTML(params: {
 
   const response = await openai.chat.completions.create({
     model: 'gpt-4o',
-    max_tokens: 4000,
+    max_tokens: 16000,
     messages: [
       {
         role: 'system',
@@ -285,7 +284,7 @@ export async function createBlogPost(params: {
   if (tags.length === 0) throw new Error('Google Doc 內找不到分類標籤（如 ＃出勤服務），請確認文件最開頭有加上標籤')
 
   // 從 Doc 直接 parse 結構化欄位
-  const docMeta = parseDocMeta(docContent)
+  const docMeta = await parseDocMeta(docContent)
   const title = docMeta.h1 || docMeta.metaTitle || bId
   const imageAlt = docMeta.imageAlts[0] || ''
 
