@@ -81,21 +81,30 @@ async function getNextBlogNumber(): Promise<number> {
   return Math.max(...numbers) + 1
 }
 
+// 從 GitHub 讀取最新一篇 blog HTML 作為模板
+async function getLatestBlogTemplate(currentBlogNumber: number): Promise<string> {
+  const prevBId = `b${currentBlogNumber - 1}`
+  const { data } = await octokit.repos.getContent({
+    owner: REPO_OWNER,
+    repo: REPO_NAME,
+    path: `src/blog/zh-TW/${prevBId}.html`,
+    ref: BASE_BRANCH,
+  })
+  if (Array.isArray(data) || data.type !== 'file') throw new Error(`找不到模板 ${prevBId}.html`)
+  return Buffer.from(data.content, 'base64').toString('utf-8')
+}
+
 // 用 GPT-4o 把 Doc 內容轉成 blog HTML
 async function generateBlogHTML(params: {
   docContent: string
   blogNumber: number
   imageCount: number
   date: string
+  templateHtml: string
 }): Promise<string> {
-  const { docContent, blogNumber, imageCount, date } = params
+  const { docContent, blogNumber, imageCount, date, templateHtml } = params
   const bId = `b${blogNumber}`
-
-  const imageTagsExample = Array.from({ length: imageCount }, (_, i) => {
-    const n = i + 1
-    if (n === 1) return `（第一張圖放在 h1 上方，固定格式）`
-    return `圖片 ${n}：<picture><source srcset="/images/pages/${bId}_image_${n}.webp" type="image/webp"><img alt="[描述]" src="/images/pages/${bId}_image_${n}.jpg"></picture>`
-  }).join('\n')
+  const prevBId = `b${blogNumber - 1}`
 
   const response = await openai.chat.completions.create({
     model: 'gpt-4o',
@@ -104,24 +113,26 @@ async function generateBlogHTML(params: {
       {
         role: 'system',
         content: `你是 goface.me 的部落格文章 HTML 生成助手。
-根據提供的文章內容，生成符合以下模板格式的完整 HTML。
+根據提供的「參考模板」與「新文章內容」，生成一篇全新的完整 HTML。
 
-模板結構（請嚴格參考）：
-- head：title、meta keywords、meta description、og tags、FAQ JSON-LD schema
-- body：header include、h1、目錄 card、h2/h3 章節、圖片穿插、FAQ Q&A、CTA 按鈕、footer include
-- 語系佔位符：\${{ _lang_ }}\$、\${{blog.pass}}\$、\${{blog.checkin}}\$、\${{blog.technical}}\$ 等照抄
-- include 路徑：@@include('../../../src/head.html') 等照抄
-- 圖片命名：${bId}_image_1.jpg、${bId}_image_2.jpg...
-- og:url：https://www.goface.me/zh-TW/blog/zh-TW/${bId}.html
-- 日期：${date}
-- 圖片數量：${imageCount} 張，第一張放 h1 上方，其餘穿插在適合的段落之間
-- 延伸閱讀：放在最後一個 h2 章節末尾，連結到 b81.html
+規則：
+- 嚴格沿用模板的所有 HTML 結構、class 名稱、include 路徑、語系佔位符
+- 語系佔位符（如 \${{ _lang_ }}\$、\${{blog.pass}}\$ 等）照抄不要更動
+- include 路徑（如 @@include('../../../src/head.html')）照抄不要更動
+- 圖片命名改為新編號：${bId}_image_1.jpg、${bId}_image_2.jpg...（共 ${imageCount} 張）
+- 第一張圖放在 h1 上方
+- 其餘圖片穿插在適合的段落之間
+- og:url 改為：https://www.goface.me/zh-TW/blog/zh-TW/${bId}.html
+- 日期改為：${date}
+- 延伸閱讀連結改為指向 ${prevBId}.html
+- title、meta、og、h1、h2、h3、內文、FAQ 全部換成新文章的內容
+- FAQ JSON-LD schema 也要根據新文章的 FAQ 內容重新生成
 
-只回傳完整 HTML，不要加說明文字。`
+只回傳完整 HTML，不要加任何說明文字或 markdown 標記。`
       },
       {
         role: 'user',
-        content: `以下是文章內容，請生成 HTML：\n\n${docContent}`,
+        content: `# 參考模板\n\n${templateHtml}\n\n# 新文章內容\n\n${docContent}`,
       },
     ],
   })
@@ -151,12 +162,16 @@ export async function createBlogPost(params: {
   const bId = `b${blogNumber}`
   const date = new Date().toLocaleDateString('zh-TW', { year: 'numeric', month: '2-digit', day: '2-digit' }).replace(/\//g, '/')
 
+  // 讀取上一篇 blog 作為模板
+  const templateHtml = await getLatestBlogTemplate(blogNumber)
+
   // 生成 HTML
   const html = await generateBlogHTML({
     docContent,
     blogNumber,
     imageCount: images.length,
     date,
+    templateHtml,
   })
 
   if (!html) throw new Error('HTML 生成失敗')
