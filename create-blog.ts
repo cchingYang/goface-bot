@@ -104,15 +104,30 @@ const TAG_MAP: Record<string, { ct: string; blog: string }> = {
   '其他':     { ct: 'ct-other',       blog: 'blog.other' },
 }
 
-// 從 Doc 內容解析 # 標籤
+// 從 Doc 內容解析 # 或 ＃ 標籤
 function parseHashtags(docContent: string): Array<{ ct: string; blog: string }> {
-  const matches = docContent.match(/#([^\s#\n]+)/g) || []
+  const matches = docContent.match(/[#＃]([^\s#＃\n]+)/g) || []
   const result: Array<{ ct: string; blog: string }> = []
   for (const tag of matches) {
-    const label = tag.replace('#', '').trim()
+    const label = tag.replace(/^[#＃]/, '').trim()
     if (TAG_MAP[label]) result.push(TAG_MAP[label])
   }
   return result
+}
+
+// 從 Doc 內容直接 parse 結構化欄位
+function parseDocMeta(docContent: string): { metaTitle?: string; metaDescription?: string; h1?: string; imageAlts: string[] } {
+  const metaTitleMatch = docContent.match(/Meta Title[：:]\s*(.+)/i)
+  const metaDescMatch = docContent.match(/Meta Description[：:]\s*([\s\S]+?)(?=\n\n|\nH1|\nalt=)/i)
+  const h1Match = docContent.match(/H1\s*(.+)/i)
+  const altMatches = [...docContent.matchAll(/alt=[""]([^"""]+)[""]|alt=\s*"\s*([^"]+)"/gi)]
+
+  return {
+    metaTitle: metaTitleMatch?.[1]?.trim(),
+    metaDescription: metaDescMatch?.[1]?.trim().replace(/\n/g, ''),
+    h1: h1Match?.[1]?.trim(),
+    imageAlts: altMatches.map(m => (m[1] || m[2])?.trim()).filter(Boolean) as string[],
+  }
 }
 
 // 用 GPT-4o 生成 blog.html 用的 post-item HTML 片段
@@ -189,8 +204,11 @@ async function generateBlogHTML(params: {
   imageCount: number
   date: string
   templateHtml: string
+  metaTitle?: string
+  metaDescription?: string
+  imageAlts?: string[]
 }): Promise<string> {
-  const { docContent, blogNumber, imageCount, date, templateHtml } = params
+  const { docContent, blogNumber, imageCount, date, templateHtml, metaTitle, metaDescription, imageAlts } = params
   const bId = `b${blogNumber}`
   const prevBId = `b${blogNumber - 1}`
 
@@ -208,13 +226,14 @@ async function generateBlogHTML(params: {
 - 語系佔位符（如 \${{ _lang_ }}\$、\${{blog.pass}}\$ 等）照抄不要更動
 - include 路徑（如 @@include('../../../src/head.html')）照抄不要更動
 - 圖片命名改為新編號：${bId}_image_1.jpg、${bId}_image_2.jpg...（共 ${imageCount} 張）
-- 第一張圖放在 h1 上方
-- 其餘圖片穿插在適合的段落之間
+- 第一張圖放在 h1 上方，其餘圖片穿插在適合的段落之間
 - og:url 改為：https://www.goface.me/zh-TW/blog/zh-TW/${bId}.html
 - 日期改為：${date}
 - 延伸閱讀連結改為指向 ${prevBId}.html
-- title、meta、og、h1、h2、h3、內文、FAQ 全部換成新文章的內容
-- FAQ JSON-LD schema 也要根據新文章的 FAQ 內容重新生成
+- FAQ JSON-LD schema 根據新文章的 FAQ 內容重新生成
+${metaTitle ? `- title 和 og:title 使用：${metaTitle}` : ''}
+${metaDescription ? `- meta description 和 og:description 使用：${metaDescription}` : ''}
+${imageAlts && imageAlts.length > 0 ? `- 圖片 alt 依序使用：${imageAlts.map((a, i) => `圖${i + 1}: ${a}`).join('、')}` : ''}
 
 只回傳完整 HTML，不要加任何說明文字或 markdown 標記。`
       },
@@ -260,6 +279,9 @@ export async function createBlogPost(params: {
     imageCount: images.length,
     date,
     templateHtml,
+    metaTitle: docMeta.metaTitle,
+    metaDescription: docMeta.metaDescription,
+    imageAlts: docMeta.imageAlts,
   })
 
   if (!html) throw new Error('HTML 生成失敗')
@@ -315,10 +337,12 @@ export async function createBlogPost(params: {
 
   // 解析 hashtag 分類
   const tags = parseHashtags(docContent)
-  if (tags.length === 0) throw new Error('Google Doc 內找不到分類標籤（如 #出勤服務），請確認文件內有加上標籤')
+  if (tags.length === 0) throw new Error('Google Doc 內找不到分類標籤（如 ＃出勤服務），請確認文件最開頭有加上標籤')
 
-  // 取得標題與圖片 alt
-  const { title, imageAlt } = await extractTitleAndAlt(docContent)
+  // 從 Doc 直接 parse 結構化欄位
+  const docMeta = parseDocMeta(docContent)
+  const title = docMeta.h1 || docMeta.metaTitle || bId
+  const imageAlt = docMeta.imageAlts[0] || ''
 
   // 生成 post-item 並插入 blog.html
   const postItem = await generatePostItem({ bId, docContent, date, title, imageAlt, tags })
