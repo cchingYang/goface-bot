@@ -93,56 +93,80 @@ async function fetchGithubFile(path: string): Promise<{ content: string; sha: st
   return { content: Buffer.from(data.content, 'base64').toString('utf-8'), sha: data.sha }
 }
 
+// hashtag → ct-* 對應表
+const TAG_MAP: Record<string, { ct: string; blog: string }> = {
+  '出勤服務': { ct: 'ct-checkin',     blog: 'blog.checkin' },
+  '門禁服務': { ct: 'ct-pass',        blog: 'blog.pass' },
+  '場域安全': { ct: 'ct-application', blog: 'blog.application' },
+  '顧客管理': { ct: 'ct-customer',    blog: 'blog.customer' },
+  '技術研究': { ct: 'ct-technical',   blog: 'blog.technical' },
+  '案例分享': { ct: 'ct-case',        blog: 'blog.case' },
+  '其他':     { ct: 'ct-other',       blog: 'blog.other' },
+}
+
+// 從 Doc 內容解析 # 標籤
+function parseHashtags(docContent: string): Array<{ ct: string; blog: string }> {
+  const matches = docContent.match(/#([^\s#\n]+)/g) || []
+  const result: Array<{ ct: string; blog: string }> = []
+  for (const tag of matches) {
+    const label = tag.replace('#', '').trim()
+    if (TAG_MAP[label]) result.push(TAG_MAP[label])
+  }
+  return result
+}
+
 // 用 GPT-4o 生成 blog.html 用的 post-item HTML 片段
 async function generatePostItem(params: {
   bId: string
   docContent: string
   date: string
+  title: string
+  imageAlt: string
+  tags: Array<{ ct: string; blog: string }>
 }): Promise<string> {
-  const { bId, docContent, date } = params
+  const { bId, date, title, imageAlt, tags } = params
 
+  const ctClasses = tags.map(t => t.ct).join(' ')
+  const blogTags = tags.map(t => `\${{${t.blog}}}\$`).join('、')
+
+  return `<div class="post-item border ${ctClasses}">
+                        <div class="post-item-wrap">
+                            <div class="post-image embed-responsive embed-responsive-4by3">
+                                <a href="${bId}.html" class="embed-responsive-item">
+                                    <img alt="${imageAlt}" src="/images/pages/${bId}_image_1.jpg">
+                                </a>
+                            </div>
+                            <div class="post-item-description bg-gray-10">
+                                <span class="post-meta-date">${date}</span>
+                                <div class="text-grey-60 d-flex align-items-center"><span
+                                        class="icon-sell mr-1"></span>${blogTags}
+                                </div>
+                                <h2 class="text-truncate text-truncate--2"><a href="${bId}.html">${title}</a></h2>
+                            </div>
+                        </div>
+                    </div>`
+}
+
+// 用 GPT-4o 取得文章標題與第一張圖 alt
+async function extractTitleAndAlt(docContent: string): Promise<{ title: string; imageAlt: string }> {
   const response = await openai.chat.completions.create({
     model: 'gpt-4o',
-    max_tokens: 500,
+    max_tokens: 200,
+    response_format: { type: 'json_object' },
     messages: [
       {
         role: 'system',
-        content: `你是 goface.me 部落格列表的 HTML 生成助手。
-根據文章內容，生成一個 post-item 的 HTML 片段，格式嚴格參考以下範例：
+        content: `從文章內容中取得以下資訊，回傳 JSON：
+- title：文章的主標題（h1）
+- imageAlt：第一張圖片的 alt 描述（繁體中文，描述圖片場景，約 20-30 字）
 
-<div class="post-item border ct-pass ct-checkin ct-technical">
-    <div class="post-item-wrap">
-        <div class="post-image embed-responsive embed-responsive-4by3">
-            <a href="b81.html" class="embed-responsive-item">
-                <img alt="AI臉部辨識考勤系統在現代辦公室平板電腦上進行人臉辨識與活體偵測打卡" src="/images/pages/b81_image_1.jpg">
-            </a>
-        </div>
-        <div class="post-item-description bg-gray-10">
-            <span class="post-meta-date">2026/06/04</span>
-            <div class="text-grey-60 d-flex align-items-center"><span class="icon-sell mr-1"></span>\${{blog.pass}}\$、\${{blog.checkin}}\$、\${{blog.technical}}\$
-            </div>
-            <h2 class="text-truncate text-truncate--2"><a href="b81.html">為什麼 AI 人臉辨識是考勤的未來？GoFace徹底解決代打卡與傳統刷卡機耗損問題</a></h2>
-        </div>
-    </div>
-</div>
-
-規則：
-- href 和 img src 改為新文章的 ${bId}
-- img alt 根據文章內容描述第一張圖
-- date 改為 ${date}
-- ct-* class 從以下選項中選擇符合文章內容的：ct-pass、ct-checkin、ct-technical、ct-application、ct-customer、ct-case
-- \${{blog.XXX}}\$ 標籤與 ct-* class 對應，有幾個 ct-* 就列幾個 blog 標籤
-- h2 標題從文章 h1 標題取得
-- 只回傳 HTML 片段，不要其他說明`
+只回傳 JSON，格式：{"title":"...","imageAlt":"..."}`
       },
-      {
-        role: 'user',
-        content: `文章編號：${bId}\n日期：${date}\n\n文章內容：\n${docContent}`,
-      },
+      { role: 'user', content: docContent },
     ],
   })
-
-  return response.choices[0]?.message?.content?.trim() || ''
+  const raw = response.choices[0]?.message?.content || '{}'
+  return JSON.parse(raw)
 }
 
 // 從 GitHub 讀取最新一篇 blog HTML 作為模板
@@ -289,8 +313,15 @@ export async function createBlogPost(params: {
     branch: branchName,
   })
 
+  // 解析 hashtag 分類
+  const tags = parseHashtags(docContent)
+  if (tags.length === 0) throw new Error('Google Doc 內找不到分類標籤（如 #出勤服務），請確認文件內有加上標籤')
+
+  // 取得標題與圖片 alt
+  const { title, imageAlt } = await extractTitleAndAlt(docContent)
+
   // 生成 post-item 並插入 blog.html
-  const postItem = await generatePostItem({ bId, docContent, date })
+  const postItem = await generatePostItem({ bId, docContent, date, title, imageAlt, tags })
   if (!postItem) throw new Error('post-item 生成失敗')
 
   const blogListPath = 'src/blog/zh-TW/blog.html'
