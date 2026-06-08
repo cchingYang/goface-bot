@@ -120,14 +120,23 @@ function parseDocMeta(docContent: string): { metaTitle?: string; metaDescription
   const metaTitleMatch = docContent.match(/Meta Title[：:]\s*(.+)/i)
   const metaDescMatch = docContent.match(/Meta Description[：:]\s*([\s\S]+?)(?=\n\n|\nH1|\nalt=)/i)
   const h1Match = docContent.match(/H1\s*(.+)/i)
-  // Doc 格式：alt=" 描述文字" />  （全形引號）
-  const altMatches = [...docContent.matchAll(/alt=[""\"]\s*([^""\"\n]+?)\s*[""\"]\s*\/?>/gi)]
+  // Doc 格式：每行 alt=" 描述文字" />，直接 split 行找含 alt= 的行
+  const imageAlts = docContent
+    .split(/\r?\n/)
+    .filter(line => line.toLowerCase().includes('alt='))
+    .map(line => {
+      // 移除 alt= 前的部分，取引號內文字
+      const after = line.replace(/^.*alt=/i, '')
+      // 移除各種引號（全形、半形）取中間文字
+      return after.replace(/^["""'\s]+/, '').replace(/["""'\s]+\/?>\s*$/, '').trim()
+    })
+    .filter(Boolean)
 
   return {
     metaTitle: metaTitleMatch?.[1]?.trim(),
     metaDescription: metaDescMatch?.[1]?.trim().replace(/\n/g, ''),
     h1: h1Match?.[1]?.trim(),
-    imageAlts: altMatches.map(m => m[1]?.trim()).filter(Boolean) as string[],
+    imageAlts,
   }
 }
 
