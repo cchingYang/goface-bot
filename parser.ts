@@ -4,7 +4,7 @@ const client = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 })
 
-export type TaskType = 'update_file' | 'review_only' | 'unknown'
+export type TaskType = 'update_file' | 'review_only' | 'create_blog' | 'unknown'
 
 export interface FileChange {
   url: string
@@ -18,6 +18,8 @@ export interface ParsedRequest {
   changes?: FileChange[]
   // review_only 用
   reviewUrl?: string
+  // create_blog 用
+  driveFolderUrl?: string
 }
 
 export async function parseSlackMessage(text: string): Promise<ParsedRequest> {
@@ -32,18 +34,22 @@ export async function parseSlackMessage(text: string): Promise<ParsedRequest> {
         role: 'system',
         content: `你是 goface-bot 的訊息解析助手。判斷用戶想做什麼，回傳 JSON。
 
-taskType 只有三種：
+taskType 只有四種：
 1. "update_file" — 修改現有頁面的某段文字，支援一次修改多個網址、每個網址多段文字
    需要：changes 陣列，每筆包含 url（網址）、original（原文）、replacement（改文）
 
 2. "review_only" — 審查某頁面的 SEO，只要分析建議，不改檔案
    需要：reviewUrl（要審查的網址）
 
-3. "unknown" — 無法判斷，或不屬於以上任務
+3. "create_blog" — 從 Google Drive 資料夾建立新部落格文章
+   需要：driveFolderUrl（Google Drive 資料夾網址）
+
+4. "unknown" — 無法判斷，或不屬於以上任務
 
 判斷規則：
 - 有提到「改」「修改」「替換」「更新」某段文字 → update_file
 - 有提到「審查」「分析」「建議」「看看」「哪裡可以改」→ review_only
+- 有提到「新增」「發布」「上傳」「建立」文章，並附上 Google Drive 網址 → create_blog
 - 其他 → unknown
 
 只回傳 JSON，不要其他文字。
@@ -59,6 +65,10 @@ taskType 只有三種：
 範例三（多個網址）：
 輸入：幫我改 https://goface.me/blog/b31.html 的「A」改成「B」，https://goface.me/blog/b71.html 的「C」改成「D」
 輸出：{"taskType":"update_file","changes":[{"url":"https://goface.me/blog/b31.html","original":"A","replacement":"B"},{"url":"https://goface.me/blog/b71.html","original":"C","replacement":"D"}]}
+
+範例四（新增部落格）：
+輸入：幫我發布這篇文章 https://drive.google.com/drive/folders/xxx
+輸出：{"taskType":"create_blog","driveFolderUrl":"https://drive.google.com/drive/folders/xxx"}
 
 輸入：幫我看看 https://goface.me/blog/b29.html 的 SEO 哪裡可以改
 輸出：{"taskType":"review_only","reviewUrl":"https://goface.me/blog/b29.html"}

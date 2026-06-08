@@ -11,6 +11,7 @@ function getRawBody(req: IncomingMessage): Promise<string> {
 }
 import { parseSlackMessage } from '../../parser'
 import { createSEOPullRequest } from '../../update-file'
+import { createBlogPost } from '../../create-blog'
 import { reviewPageSEO } from '../../review-seo'
 import { replyToSlack } from '../../slack'
 import { verifySlackSignature } from '../../verify'
@@ -79,6 +80,22 @@ async function processInBackground(event: any) {
         })
         await replyToSlack(channel, ts,
           `✅ 修改完成，PR 已建立！\n\n*PR #${prNumber}*\n${prUrl}\n\n請 <@U0819C25K51> review 後 merge。`)
+        break
+      }
+
+      case 'create_blog': {
+        if (!parsed.driveFolderUrl) {
+          await replyToSlack(channel, ts,
+            '⚠️ 請提供 Google Drive 資料夾網址。\n\n例：幫我發布這篇文章 https://drive.google.com/drive/folders/xxx')
+          return
+        }
+        await replyToSlack(channel, ts, '⏳ 正在讀取文章內容並生成 HTML，請稍候（約 1-2 分鐘）...')
+        const { prUrl, prNumber, blogNumber } = await createBlogPost({
+          driveFolderUrl: parsed.driveFolderUrl,
+          slackUser,
+        })
+        await replyToSlack(channel, ts,
+          `✅ 文章 b${blogNumber} 已建立，PR 已開啟！\n\n*PR #${prNumber}*\n${prUrl}\n\n請 <@U0819C25K51> review 後 merge。`)
         break
       }
 
