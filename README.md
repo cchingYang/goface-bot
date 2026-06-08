@@ -1,6 +1,6 @@
 # goface-bot
 
-Slack Bot，讓行銷/設計同事用自然語言修改 goface.me 官網內容，自動同步 src、dist、sitemap 並開 GitHub PR。只需工程師介入檢視 PR、再 merge + deploy 到 Jenkins。
+Slack Bot，讓行銷/設計同事用自然語言修改 goface.me 官網內容，自動修改 src 並開 GitHub PR。PR 開啟後由 GitHub Actions 自動產出 dist、sitemap、markdown，只需工程師 review PR 後 merge 即完成。
 
 ## 技術架構
 
@@ -8,14 +8,15 @@ Slack Bot，讓行銷/設計同事用自然語言修改 goface.me 官網內容�
 |------|------|
 | **Vercel** | 雲端部署，提供公開 HTTPS endpoint 接收 Slack 事件 |
 | **OpenAI GPT-4o** | 解析同事輸入的自然語言，判斷任務類型並抽取參數 |
-| **GitHub API** | 找到對應 HTML 檔、替換內容、同步 dist 與 sitemap、自動開 PR |
+| **GitHub API** | 找到對應 src 檔、替換內容、自動開 PR |
+| **GitHub Actions** | PR 開啟後自動執行 `gulp build:ci`，產出 dist、sitemap、markdown 並 commit 回 PR branch |
 | **Slack API** | 接收 app_mention 事件、驗證請求來源、回覆處理結果至 thread |
 
 ## 支援任務
 
 | 同事說的話 | Bot 動作 |
 |-----------|--------|
-| 幫我改 [網址] 的「原文」改成「新文字」 | 找檔案 → 替換 → 更新 dist → 更新 sitemap → 開 PR |
+| 幫我改 [網址] 的「原文」改成「新文字」 | 找 src 檔案 → 替換文字 → 開 PR → GitHub Actions 自動 build dist + sitemap + markdown |
 | 幫我看看 [網址] 的 SEO | 分析頁面 → 回覆建議（不開 PR） |
 | 其他 | 回覆使用說明 |
 
@@ -26,7 +27,7 @@ goface-bot/
 ├── api/slack/
 │   └── events.ts     # Vercel Serverless Function，接收 Slack 事件，分派任務
 ├── parser.ts          # OpenAI 解析自然語言 → taskType
-├── update-file.ts     # 找檔案、替換文字、更新 dist + sitemap、開 PR
+├── update-file.ts     # 找 src 檔案、替換文字、開 PR（dist 由 GitHub Actions 產出）
 ├── review-seo.ts      # 抓頁面內容，分析 SEO
 ├── slack.ts           # 回覆 Slack thread
 ├── verify.ts          # 驗證請求來自 Slack
@@ -52,17 +53,20 @@ goface-bot/
 
 ## 檔案更新邏輯
 
-同事傳入網址後，bot 會自動判斷並更新對應檔案：
+同事傳入網址後，bot 只修改 src 檔案並開 PR，dist 由 GitHub Actions 自動產出：
 
 - **blog 頁面**（`/zh-TW/blog/zh-TW/b80.html`）
-  - src：`src/blog/zh-TW/b80.html`
-  - dist：`dist/zh-TW/blog/zh-TW/b80.html`
+  - bot 修改：`src/blog/zh-TW/b80.html`
 
 - **一般頁面**（`/zh-TW/checkin.html`）
-  - src：`src/lang/zh-TW/checkin.json`（文字存在 lang json）
-  - dist：`dist/zh-TW/checkin.html`
+  - bot 修改：`src/lang/zh-TW/checkin.json`（文字存在 lang json）
 
-- **sitemap**：自動更新 `dist/sitemap.xml` 對應頁面的 `lastmod`
+PR 開啟後，**GitHub Actions**（goface.me repo）自動執行 `gulp build:ci`：
+- HTML 編譯（`include` + `lang`）
+- CSS/JS 產出
+- `dist/sitemap.xml` 更新
+- markdown 產出
+- 將 dist commit 回 PR branch，merge 即完成部署
 
 ## 部署
 
