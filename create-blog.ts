@@ -30,7 +30,9 @@ async function getDriveFolderContents(folderId: string) {
 
   const files = data.files || []
   const doc = files.find(f => f.mimeType === 'application/vnd.google-apps.document')
-  const images = files.filter(f => f.mimeType?.startsWith('image/'))
+  const images = files
+    .filter(f => f.mimeType?.startsWith('image/'))
+    .sort((a, b) => (a.name || '').localeCompare(b.name || '', undefined, { numeric: true }))
 
   if (!doc) throw new Error('資料夾內找不到 Google Doc')
   return { docId: doc.id!, images }
