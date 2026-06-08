@@ -120,7 +120,8 @@ function parseDocMeta(docContent: string): { metaTitle?: string; metaDescription
   const metaTitleMatch = docContent.match(/Meta Title[：:]\s*(.+)/i)
   const metaDescMatch = docContent.match(/Meta Description[：:]\s*([\s\S]+?)(?=\n\n|\nH1|\nalt=)/i)
   const h1Match = docContent.match(/H1\s*(.+)/i)
-  const altMatches = [...docContent.matchAll(/alt=[""\s]*([^"""\n/>]{5,}?)[""\s]*\/?>/gi)]
+  // Doc 格式：alt=" 描述文字" />  （全形引號）
+  const altMatches = [...docContent.matchAll(/alt=[""\"]\s*([^""\"\n]+?)\s*[""\"]\s*\/?>/gi)]
 
   return {
     metaTitle: metaTitleMatch?.[1]?.trim(),
