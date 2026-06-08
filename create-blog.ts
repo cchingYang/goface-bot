@@ -120,13 +120,13 @@ function parseDocMeta(docContent: string): { metaTitle?: string; metaDescription
   const metaTitleMatch = docContent.match(/Meta Title[：:]\s*(.+)/i)
   const metaDescMatch = docContent.match(/Meta Description[：:]\s*([\s\S]+?)(?=\n\n|\nH1|\nalt=)/i)
   const h1Match = docContent.match(/H1\s*(.+)/i)
-  const altMatches = [...docContent.matchAll(/alt=[""]([^"""]+)[""]|alt=\s*"\s*([^"]+)"/gi)]
+  const altMatches = [...docContent.matchAll(/alt=[""\s]*([^"""\n/>]{5,}?)[""\s]*\/?>/gi)]
 
   return {
     metaTitle: metaTitleMatch?.[1]?.trim(),
     metaDescription: metaDescMatch?.[1]?.trim().replace(/\n/g, ''),
     h1: h1Match?.[1]?.trim(),
-    imageAlts: altMatches.map(m => (m[1] || m[2])?.trim()).filter(Boolean) as string[],
+    imageAlts: altMatches.map(m => m[1]?.trim()).filter(Boolean) as string[],
   }
 }
 
@@ -269,6 +269,15 @@ export async function createBlogPost(params: {
   const bId = `b${blogNumber}`
   const date = new Date().toLocaleDateString('zh-TW', { year: 'numeric', month: '2-digit', day: '2-digit' }).replace(/\//g, '/')
 
+  // 解析 hashtag 分類
+  const tags = parseHashtags(docContent)
+  if (tags.length === 0) throw new Error('Google Doc 內找不到分類標籤（如 ＃出勤服務），請確認文件最開頭有加上標籤')
+
+  // 從 Doc 直接 parse 結構化欄位
+  const docMeta = parseDocMeta(docContent)
+  const title = docMeta.h1 || docMeta.metaTitle || bId
+  const imageAlt = docMeta.imageAlts[0] || ''
+
   // 讀取上一篇 blog 作為模板
   const templateHtml = await getLatestBlogTemplate(blogNumber)
 
@@ -334,15 +343,6 @@ export async function createBlogPost(params: {
     content: Buffer.from(html).toString('base64'),
     branch: branchName,
   })
-
-  // 解析 hashtag 分類
-  const tags = parseHashtags(docContent)
-  if (tags.length === 0) throw new Error('Google Doc 內找不到分類標籤（如 ＃出勤服務），請確認文件最開頭有加上標籤')
-
-  // 從 Doc 直接 parse 結構化欄位
-  const docMeta = parseDocMeta(docContent)
-  const title = docMeta.h1 || docMeta.metaTitle || bId
-  const imageAlt = docMeta.imageAlts[0] || ''
 
   // 生成 post-item 並插入 blog.html
   const postItem = await generatePostItem({ bId, docContent, date, title, imageAlt, tags })
