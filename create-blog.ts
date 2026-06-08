@@ -126,10 +126,10 @@ function parseDocMeta(docContent: string): { metaTitle?: string; metaDescription
     .filter(line => line.toLowerCase().includes('alt='))
     .map(line => {
       // 移除 alt= 前的部分
-      const after = line.replace(/^.*alt=/i, ‘’)
+      const after = line.replace(/^.*alt=/i, '')
       // 跳過開頭所有非中英文字元（各種引號、空白），取到 /> 之前
       const match = after.match(/([A-Za-z\u4e00-\u9fff][\s\S]*?)[\s\u201c\u201d"']+\s*\/?>\s*$/)
-      return match ? match[1].trim() : ‘’
+      return match ? match[1].trim() : ''
     })
     .filter(Boolean)
 
