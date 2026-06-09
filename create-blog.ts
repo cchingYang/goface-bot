@@ -38,17 +38,57 @@ async function getDriveFolderContents(folderId: string) {
   return { docId: doc.id!, images }
 }
 
-// 讀取 Google Doc 內容（匯出為純文字）
-async function getDocContent(docId: string): Promise<string> {
+// 從 Docs API 取得文字和超連結
+// hyperlinks：每個段落若含「延伸閱讀」關鍵字，收集該段落內所有帶連結的 textRun
+async function getDocContent(docId: string): Promise<{
+  text: string
+  furtherReading: { text: string; url: string } | null
+}> {
   const auth = getOAuthClient()
-  const drive = google.drive({ version: 'v3', auth })
+  const docs = google.docs({ version: 'v1', auth })
 
-  const { data } = await drive.files.export(
-    { fileId: docId, mimeType: 'text/plain' },
-    { responseType: 'text' }
-  ) as { data: string }
+  const { data } = await docs.documents.get({ documentId: docId })
 
-  return data
+  const textParts: string[] = []
+  let furtherReading: { text: string; url: string } | null = null
+
+  for (const block of data.body?.content || []) {
+    // 處理 table
+    if (block.table) {
+      for (const row of block.table.tableRows || []) {
+        for (const cell of row.tableCells || []) {
+          for (const cellBlock of cell.content || []) {
+            if (cellBlock.paragraph) {
+              const paraText = (cellBlock.paragraph.elements || [])
+                .map((e: any) => e.textRun?.content || '').join('')
+              textParts.push(paraText)
+            }
+          }
+        }
+      }
+      continue
+    }
+
+    if (!block.paragraph) continue
+
+    const elements: any[] = block.paragraph.elements || []
+    const paraText = elements.map((e: any) => e.textRun?.content || '').join('')
+    textParts.push(paraText)
+
+    // 若段落含「延伸閱讀」，找第一個有 url 的 textRun
+    if (paraText.includes('延伸閱讀') && !furtherReading) {
+      for (const el of elements) {
+        const url = el.textRun?.textStyle?.link?.url
+        const text = el.textRun?.content?.trim()
+        if (url && text) {
+          furtherReading = { text, url }
+          break
+        }
+      }
+    }
+  }
+
+  return { text: textParts.join(''), furtherReading }
 }
 
 // 下載圖片 buffer
@@ -219,13 +259,22 @@ async function generateBlogHTML(params: {
   metaTitle?: string
   metaDescription?: string
   imageAlts?: string[]
+  furtherReadingUrl?: string
+  furtherReadingText?: string
 }): Promise<string> {
-  const { docContent, blogNumber, imageCount, date, templateHtml, metaTitle, metaDescription, imageAlts } = params
+  const { docContent, blogNumber, imageCount, date, templateHtml, metaTitle, metaDescription, imageAlts, furtherReadingUrl, furtherReadingText } = params
   const bId = `b${blogNumber}`
   const prevBId = `b${blogNumber - 1}`
-  // 從模板取上一篇的 title 作為延伸閱讀文字
-  const prevTitleMatch = templateHtml.match(/<title>([^<]+)<\/title>/)
-  const prevTitle = prevTitleMatch?.[1]?.trim() || prevBId
+
+  // 延伸閱讀：優先使用 Doc 裡的連結，否則 fallback 到上一篇
+  let furtherReadingInstruction: string
+  if (furtherReadingUrl && furtherReadingText) {
+    furtherReadingInstruction = `- 延伸閱讀連結：href="${furtherReadingUrl}"，連結文字使用：${furtherReadingText}`
+  } else {
+    const prevTitleMatch = templateHtml.match(/<title>([^<]+)<\/title>/)
+    const prevTitle = prevTitleMatch?.[1]?.trim() || prevBId
+    furtherReadingInstruction = `- 延伸閱讀連結改為指向 ${prevBId}.html，連結文字使用：${prevTitle}`
+  }
 
   const response = await openai.chat.completions.create({
     model: 'gpt-4o',
@@ -244,7 +293,7 @@ async function generateBlogHTML(params: {
 - 第一張圖放在 h1 上方，其餘圖片穿插在適合的段落之間
 - og:url 改為：https://www.goface.me/zh-TW/blog/zh-TW/${bId}.html
 - 日期改為：${date}
-- 延伸閱讀連結改為指向 ${prevBId}.html，連結文字使用：${prevTitle}
+${furtherReadingInstruction}
 - FAQ JSON-LD schema 根據新文章的 FAQ 內容重新生成
 ${metaTitle ? `- title 和 og:title 使用：${metaTitle}` : ''}
 ${metaDescription ? `- meta description 和 og:description 使用：${metaDescription}` : ''}
@@ -278,8 +327,8 @@ export async function createBlogPost(params: {
   // 讀取資料夾內容
   const { docId, images } = await getDriveFolderContents(folderId)
 
-  // 讀取 Doc 內容
-  const docContent = await getDocContent(docId)
+  // 讀取 Doc 內容（含延伸閱讀超連結）
+  const { text: docContent, furtherReading } = await getDocContent(docId)
 
   // 決定文章編號
   const blogNumber = await getNextBlogNumber()
@@ -295,6 +344,10 @@ export async function createBlogPost(params: {
   const title = docMeta.h1 || docMeta.metaTitle || bId
   const imageAlt = docMeta.imageAlts[0] || ''
 
+  // 找延伸閱讀超連結（doc 中含「延伸閱讀」字樣的 hyperlink）
+  const furtherReadingUrl = furtherReading?.url
+  const furtherReadingText = furtherReading?.text
+
   // 讀取上一篇 blog 作為模板
   const templateHtml = await getLatestBlogTemplate(blogNumber)
 
@@ -308,6 +361,8 @@ export async function createBlogPost(params: {
     metaTitle: docMeta.metaTitle,
     metaDescription: docMeta.metaDescription,
     imageAlts: docMeta.imageAlts,
+    furtherReadingUrl,
+    furtherReadingText,
   })
 
   if (!html) throw new Error('HTML 生成失敗')
