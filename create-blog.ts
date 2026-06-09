@@ -56,7 +56,9 @@ async function getDocContent(docId: string): Promise<{
       const content: string = el.textRun?.content || ''
       const url: string | undefined = el.textRun?.textStyle?.link?.url
       if (url && content.trim()) {
-        return `[${content.trim()}](${url})`
+        // 保留原本結尾的換行（Google Doc 每段結尾有 \n）
+        const trailing = content.endsWith('\n') ? '\n' : ''
+        return `[${content.trim()}](${url})${trailing}`
       }
       return content
     }).join('')
