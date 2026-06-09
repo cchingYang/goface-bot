@@ -322,29 +322,38 @@ async function generateBlogHTML(params: {
       {
         role: 'system',
         content: `你是 goface.me 的部落格文章 HTML 生成助手。
-根據提供的「參考模板」與「新文章內容」，生成一篇全新的完整 HTML。
+你的任務是：把「新文章內容」的文字，填進「參考模板」的 HTML 結構中，輸出完整 HTML。
 
-規則：
-- 嚴格沿用模板的所有 HTML 結構、class 名稱、include 路徑、語系佔位符
-- 文章若有表格，使用模板的 table 結構：class="table table-bordered"，標題列用 <th scope="col">，第一欄用 <th scope="row">，第三欄（GoFace 方案欄）加 class="text-secondary" 並用 <strong> 包住關鍵詞
-- 語系佔位符（如 \${{ _lang_ }}\$、\${{blog.pass}}\$ 等）照抄不要更動
+【最高原則】
+- 新文章內容有什麼就輸出什麼，一字不多、一字不少
+- 嚴禁自行增加、刪除、改寫、重新排列任何段落或文字
+- 嚴禁腦補任何原文沒有的內容
+- 只有以下幾項允許修改（見下方規則），其他一律照抄
+
+【模板結構規則】（以下照抄，不用改）
+- HTML 結構、class 名稱、include 路徑、語系佔位符全部沿用模板
+- 語系佔位符（如 \${{ _lang_ }}\$）照抄不要更動
 - include 路徑（如 @@include('../../../src/head.html')）照抄不要更動
+
+【需要根據新文章替換的部分】
 - 圖片命名改為新編號：${bId}_image_1.jpg、${bId}_image_2.jpg...（共 ${imageCount} 張）
-- 第一張圖放在 h1 上方，其餘圖片穿插在適合的段落之間
+- 第一張圖放在 h1 上方，其餘圖片依原文順序穿插
 - og:url 改為：https://www.goface.me/zh-TW/blog/zh-TW/${bId}.html
 - 日期改為：${date}
+- 文章內的分類標籤 placeholder 改為：${tags.map(t => `\${{${t.blog}}}\$`).join('、')}
 ${furtherReadingInstruction}
-- 文章內容中的 **文字** 格式代表粗體，必須轉為 <strong>文字</strong>
-- 文章內容中的 [文字](url) 格式代表超連結，必須轉為 <a href="url" target="_blank" rel="noopener">文字</a>
-- 文章內容中 "1. 2. 3." 開頭的清單 → 使用 <ol class="pl-5 text-dark h5 font-weight-400"><li class="mb-3">...</li></ol>
-- 文章內容中 "- " 開頭的清單 → 使用 <ul class="pl-5 text-dark h5 font-weight-400"><li class="mb-3">...</li></ul>
-- 不是清單格式的純文字連結行（例如案例連結），直接用 <p><a>...</a></p>，不要加 <ul> 或 <ol>
-- 文章內容中所有段落文字都必須完整保留，不可省略任何一行（包含「更多實際案例請看：」這類引言文字）
 - FAQ JSON-LD schema 根據新文章的 FAQ 內容重新生成
-- 文章內的分類標籤 placeholder 改為：${tags.map(t => `\${{${t.blog}}}\$`).join('、')}（不可照抄模板的舊標籤）
 ${metaTitle ? `- title 和 og:title 使用：${metaTitle}` : ''}
 ${metaDescription ? `- meta description 和 og:description 使用：${metaDescription}` : ''}
 ${imageAlts && imageAlts.length > 0 ? `- 圖片 alt 依序使用：${imageAlts.map((a, i) => `圖${i + 1}: ${a}`).join('、')}` : ''}
+
+【文章內容格式對應規則】
+- **文字** → <strong>文字</strong>
+- [文字](url) → <a href="url" target="_blank" rel="noopener">文字</a>
+- "1. 2. 3." 開頭的清單 → <ol class="pl-5 text-dark h5 font-weight-400"><li class="mb-3">...</li></ol>
+- "- " 開頭的清單 → <ul class="pl-5 text-dark h5 font-weight-400"><li class="mb-3">...</li></ul>
+- 不是清單格式的純文字連結 → <p><a href="..." target="_blank" rel="noopener">...</a></p>，不要加 ul 或 ol
+- 表格 → class="table table-bordered"，標題列用 <th scope="col">，第一欄用 <th scope="row">，最後欄加 class="text-secondary" 並用 <strong> 包住關鍵詞
 
 只回傳完整 HTML，不要加任何說明文字或 markdown 標記。`
       },
