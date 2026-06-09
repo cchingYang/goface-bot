@@ -271,13 +271,14 @@ async function generateBlogHTML(params: {
   imageCount: number
   date: string
   templateHtml: string
+  tags: Array<{ ct: string; blog: string }>
   metaTitle?: string
   metaDescription?: string
   imageAlts?: string[]
   furtherReadingUrl?: string
   furtherReadingText?: string
 }): Promise<string> {
-  const { docContent, blogNumber, imageCount, date, templateHtml, metaTitle, metaDescription, imageAlts, furtherReadingUrl, furtherReadingText } = params
+  const { docContent, blogNumber, imageCount, date, templateHtml, tags, metaTitle, metaDescription, imageAlts, furtherReadingUrl, furtherReadingText } = params
   const bId = `b${blogNumber}`
 
   // 延伸閱讀：有才放，沒有就略過
@@ -306,6 +307,7 @@ async function generateBlogHTML(params: {
 ${furtherReadingInstruction}
 - 文章內容中的 [文字](url) 格式代表超連結，必須轉為 <a href="url" target="_blank" rel="noopener">文字</a>
 - FAQ JSON-LD schema 根據新文章的 FAQ 內容重新生成
+- 文章內的分類標籤 placeholder 改為：${tags.map(t => `\${{${t.blog}}}\$`).join('、')}（不可照抄模板的舊標籤）
 ${metaTitle ? `- title 和 og:title 使用：${metaTitle}` : ''}
 ${metaDescription ? `- meta description 和 og:description 使用：${metaDescription}` : ''}
 ${imageAlts && imageAlts.length > 0 ? `- 圖片 alt 依序使用：${imageAlts.map((a, i) => `圖${i + 1}: ${a}`).join('、')}` : ''}
@@ -370,6 +372,7 @@ export async function createBlogPost(params: {
     date,
     templateHtml,
     metaTitle: docMeta.metaTitle,
+    tags,
     metaDescription: docMeta.metaDescription,
     imageAlts: docMeta.imageAlts,
     furtherReadingUrl,
