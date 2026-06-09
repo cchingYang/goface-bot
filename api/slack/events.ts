@@ -50,9 +50,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
   if (eventId) processedEvents.add(eventId)
 
-  // 先處理完再回 200（serverless function 回應後即終止，不能用背景任務）
+  // 先回 200 讓 Slack 不 retry，再背景執行（Vercel 會等 async 跑完才終止）
+  res.status(200).json({ ok: true })
   await processInBackground(event)
-  return res.status(200).json({ ok: true })
 }
 
 async function processInBackground(event: any) {
