@@ -72,6 +72,11 @@ async function getDocContent(docId: string): Promise<{
         const trailing = content.endsWith('\n') ? '\n' : ''
         return `[${content.trim()}](${url})${trailing}`
       }
+      // bold textRun 結尾加換行，讓標題和說明文字分開
+      const isBold: boolean = el.textRun?.textStyle?.bold === true
+      if (isBold && content.trim() && !content.endsWith('\n')) {
+        return content + '\n'
+      }
       return content
     }).join('')
   }
@@ -333,6 +338,7 @@ ${furtherReadingInstruction}
 - 文章內容中 "1. 2. 3." 開頭的清單 → 使用 <ol class="pl-5 text-dark h5 font-weight-400"><li class="mb-3">...</li></ol>
 - 文章內容中 "- " 開頭的清單 → 使用 <ul class="pl-5 text-dark h5 font-weight-400"><li class="mb-3">...</li></ul>
 - 不是清單格式的純文字連結行（例如案例連結），直接用 <p><a>...</a></p>，不要加 <ul> 或 <ol>
+- 文章內容中所有段落文字都必須完整保留，不可省略任何一行（包含「更多實際案例請看：」這類引言文字）
 - FAQ JSON-LD schema 根據新文章的 FAQ 內容重新生成
 - 文章內的分類標籤 placeholder 改為：${tags.map(t => `\${{${t.blog}}}\$`).join('、')}（不可照抄模板的舊標籤）
 ${metaTitle ? `- title 和 og:title 使用：${metaTitle}` : ''}
