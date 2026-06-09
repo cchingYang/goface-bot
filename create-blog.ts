@@ -294,6 +294,7 @@ async function generateBlogHTML(params: {
 
 規則：
 - 嚴格沿用模板的所有 HTML 結構、class 名稱、include 路徑、語系佔位符
+- 文章若有表格，使用模板的 table 結構：class="table table-bordered"，標題列用 <th scope="col">，第一欄用 <th scope="row">，第三欄（GoFace 方案欄）加 class="text-secondary" 並用 <strong> 包住關鍵詞
 - 語系佔位符（如 \${{ _lang_ }}\$、\${{blog.pass}}\$ 等）照抄不要更動
 - include 路徑（如 @@include('../../../src/head.html')）照抄不要更動
 - 圖片命名改為新編號：${bId}_image_1.jpg、${bId}_image_2.jpg...（共 ${imageCount} 張）
