@@ -223,6 +223,9 @@ async function generateBlogHTML(params: {
   const { docContent, blogNumber, imageCount, date, templateHtml, metaTitle, metaDescription, imageAlts } = params
   const bId = `b${blogNumber}`
   const prevBId = `b${blogNumber - 1}`
+  // 從模板取上一篇的 title 作為延伸閱讀文字
+  const prevTitleMatch = templateHtml.match(/<title>([^<]+)<\/title>/)
+  const prevTitle = prevTitleMatch?.[1]?.trim() || prevBId
 
   const response = await openai.chat.completions.create({
     model: 'gpt-4o',
@@ -241,7 +244,7 @@ async function generateBlogHTML(params: {
 - 第一張圖放在 h1 上方，其餘圖片穿插在適合的段落之間
 - og:url 改為：https://www.goface.me/zh-TW/blog/zh-TW/${bId}.html
 - 日期改為：${date}
-- 延伸閱讀連結改為指向 ${prevBId}.html
+- 延伸閱讀連結改為指向 ${prevBId}.html，連結文字使用：${prevTitle}
 - FAQ JSON-LD schema 根據新文章的 FAQ 內容重新生成
 ${metaTitle ? `- title 和 og:title 使用：${metaTitle}` : ''}
 ${metaDescription ? `- meta description 和 og:description 使用：${metaDescription}` : ''}
@@ -256,7 +259,9 @@ ${imageAlts && imageAlts.length > 0 ? `- 圖片 alt 依序使用：${imageAlts.m
     ],
   })
 
-  return response.choices[0]?.message?.content || ''
+  const raw = response.choices[0]?.message?.content || ''
+  // GPT-4o 有時會包 markdown code block，strip 掉
+  return raw.replace(/^```[\w]*\n?/, '').replace(/\n?```$/, '').trim()
 }
 
 export async function createBlogPost(params: {
