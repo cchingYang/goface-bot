@@ -72,10 +72,10 @@ async function getDocContent(docId: string): Promise<{
         const trailing = content.endsWith('\n') ? '\n' : ''
         return `[${content.trim()}](${url})${trailing}`
       }
-      // bold textRun 結尾加換行，讓標題和說明文字分開
+      // bold textRun 用 ** 標記，讓 GPT-4o 輸出 <strong>
       const isBold: boolean = el.textRun?.textStyle?.bold === true
-      if (isBold && content.trim() && !content.endsWith('\n')) {
-        return content + '\n'
+      if (isBold && content.trim()) {
+        return `**${content.trim()}**`
       }
       return content
     }).join('')
@@ -334,6 +334,7 @@ async function generateBlogHTML(params: {
 - og:url 改為：https://www.goface.me/zh-TW/blog/zh-TW/${bId}.html
 - 日期改為：${date}
 ${furtherReadingInstruction}
+- 文章內容中的 **文字** 格式代表粗體，必須轉為 <strong>文字</strong>
 - 文章內容中的 [文字](url) 格式代表超連結，必須轉為 <a href="url" target="_blank" rel="noopener">文字</a>
 - 文章內容中 "1. 2. 3." 開頭的清單 → 使用 <ol class="pl-5 text-dark h5 font-weight-400"><li class="mb-3">...</li></ol>
 - 文章內容中 "- " 開頭的清單 → 使用 <ul class="pl-5 text-dark h5 font-weight-400"><li class="mb-3">...</li></ul>
