@@ -353,6 +353,15 @@ ${imageAlts && imageAlts.length > 0 ? `- 圖片 alt 依序使用：${imageAlts.m
 - "1. 2. 3." 開頭的清單 → <ol class="pl-5 text-dark h5 font-weight-400"><li class="mb-3">...</li></ol>
 - "- " 開頭的清單 → <ul class="pl-5 text-dark h5 font-weight-400"><li class="mb-3">...</li></ul>
 - 不是清單格式的純文字連結 → <p><a href="..." target="_blank" rel="noopener">...</a></p>，不要加 ul 或 ol
+- "CTA｜[按鈕文字](url)" 代表 CTA 按鈕區塊，連同前一行描述文字，一起輸出為：
+  <div class="text-center mt-5">
+    <h4 class="mb-4">（前一行的描述文字）</h4>
+    <a id="business_inquire" href="url" target="_blank" rel="noreferrer noopener">
+      <button class="btn btn-secondary btn-rounded">
+        <span class="h5">按鈕文字</span>
+      </button>
+    </a>
+  </div>
 - 表格 → class="table table-bordered"，標題列用 <th scope="col">，第一欄用 <th scope="row">，最後欄加 class="text-secondary" 並用 <strong> 包住關鍵詞
 
 只回傳完整 HTML，不要加任何說明文字或 markdown 標記。`
