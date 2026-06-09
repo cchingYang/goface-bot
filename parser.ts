@@ -67,7 +67,7 @@ taskType 只有四種：
 輸出：{"taskType":"update_file","changes":[{"url":"https://goface.me/blog/b31.html","original":"A","replacement":"B"},{"url":"https://goface.me/blog/b71.html","original":"C","replacement":"D"}]}
 
 範例四（新增部落格）：
-輸入：幫我發布這篇文章 https://drive.google.com/drive/folders/xxx
+輸入：幫我新增這篇文章 https://drive.google.com/drive/folders/xxx
 輸出：{"taskType":"create_blog","driveFolderUrl":"https://drive.google.com/drive/folders/xxx"}
 
 輸入：幫我看看 https://goface.me/blog/b29.html 的 SEO 哪裡可以改

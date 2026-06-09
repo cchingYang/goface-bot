@@ -86,7 +86,7 @@ async function processInBackground(event: any) {
       case 'create_blog': {
         if (!parsed.driveFolderUrl) {
           await replyToSlack(channel, ts,
-            '⚠️ 請提供 Google Drive 資料夾網址。\n\n例：幫我發布這篇文章 https://drive.google.com/drive/folders/xxx')
+            '⚠️ 請提供 Google Drive 資料夾網址。\n\n例：幫我新增這篇文章 https://drive.google.com/drive/folders/xxx')
           return
         }
         await replyToSlack(channel, ts, '⏳ 正在讀取文章內容並生成 HTML，請稍候（約 1-2 分鐘）...')

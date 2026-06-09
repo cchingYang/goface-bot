@@ -7,7 +7,7 @@ Slack Bot，讓行銷/設計同事用自然語言操作 goface.me 官網，自�
 | 同事說的話 | Bot 動作 |
 |-----------|--------|
 | 幫我改 [網址] 的「原文」改成「新文字」 | 找 src 檔 → 替換文字 → 開 PR |
-| 幫我發布這篇文章 [Google Drive 資料夾網址] | 從 Drive 讀取 Doc + 圖片 → 生成 HTML → 開 PR |
+| 幫我新增這篇文章 [Google Drive 資料夾網址] | 從 Drive 讀取 Doc + 圖片 → 生成 HTML → 開 PR |
 | 幫我看看 [網址] 的 SEO | 分析頁面 → 回覆建議（不開 PR） |
 
 PR 開啟後，**GitHub Actions**（goface.me repo）自動執行：
