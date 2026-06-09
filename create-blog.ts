@@ -38,8 +38,8 @@ async function getDriveFolderContents(folderId: string) {
   return { docId: doc.id!, images }
 }
 
-// 從 Docs API 取得文字和超連結
-// hyperlinks：每個段落若含「延伸閱讀」關鍵字，收集該段落內所有帶連結的 textRun
+// 從 Docs API 取得文字（含超連結，輸出 markdown 連結格式）
+// 有超連結的 textRun 輸出為 [文字](url)，讓 GPT-4o 生成 <a> 標籤
 async function getDocContent(docId: string): Promise<{
   text: string
   furtherReading: { text: string; url: string } | null
@@ -49,34 +49,25 @@ async function getDocContent(docId: string): Promise<{
 
   const { data } = await docs.documents.get({ documentId: docId })
 
-  const textParts: string[] = []
   let furtherReading: { text: string; url: string } | null = null
 
-  for (const block of data.body?.content || []) {
-    // 處理 table
-    if (block.table) {
-      for (const row of block.table.tableRows || []) {
-        for (const cell of row.tableCells || []) {
-          for (const cellBlock of cell.content || []) {
-            if (cellBlock.paragraph) {
-              const paraText = (cellBlock.paragraph.elements || [])
-                .map((e: any) => e.textRun?.content || '').join('')
-              textParts.push(paraText)
-            }
-          }
-        }
+  function renderElements(elements: any[]): string {
+    return elements.map((el: any) => {
+      const content: string = el.textRun?.content || ''
+      const url: string | undefined = el.textRun?.textStyle?.link?.url
+      if (url && content.trim()) {
+        return `[${content.trim()}](${url})`
       }
-      continue
-    }
+      return content
+    }).join('')
+  }
 
-    if (!block.paragraph) continue
+  function renderParagraph(para: any): string {
+    const elements: any[] = para.elements || []
+    const rendered = renderElements(elements)
 
-    const elements: any[] = block.paragraph.elements || []
-    const paraText = elements.map((e: any) => e.textRun?.content || '').join('')
-    textParts.push(paraText)
-
-    // 若段落含「延伸閱讀」，找第一個有 url 的 textRun
-    if (paraText.includes('延伸閱讀') && !furtherReading) {
+    // 若段落含「延伸閱讀」，抓第一個有 url 的 textRun 作為延伸閱讀
+    if (rendered.includes('延伸閱讀') && !furtherReading) {
       for (const el of elements) {
         const url = el.textRun?.textStyle?.link?.url
         const text = el.textRun?.content?.trim()
@@ -86,9 +77,31 @@ async function getDocContent(docId: string): Promise<{
         }
       }
     }
+
+    return rendered
   }
 
-  return { text: textParts.join(''), furtherReading }
+  const parts: string[] = []
+
+  for (const block of data.body?.content || []) {
+    if (block.table) {
+      for (const row of block.table.tableRows || []) {
+        for (const cell of row.tableCells || []) {
+          for (const cellBlock of cell.content || []) {
+            if (cellBlock.paragraph) {
+              parts.push(renderParagraph(cellBlock.paragraph))
+            }
+          }
+        }
+      }
+      continue
+    }
+    if (block.paragraph) {
+      parts.push(renderParagraph(block.paragraph))
+    }
+  }
+
+  return { text: parts.join(''), furtherReading }
 }
 
 // 下載圖片 buffer
@@ -288,6 +301,7 @@ async function generateBlogHTML(params: {
 - og:url 改為：https://www.goface.me/zh-TW/blog/zh-TW/${bId}.html
 - 日期改為：${date}
 ${furtherReadingInstruction}
+- 文章內容中的 [文字](url) 格式代表超連結，必須轉為 <a href="url" target="_blank" rel="noopener">文字</a>
 - FAQ JSON-LD schema 根據新文章的 FAQ 內容重新生成
 ${metaTitle ? `- title 和 og:title 使用：${metaTitle}` : ''}
 ${metaDescription ? `- meta description 和 og:description 使用：${metaDescription}` : ''}
