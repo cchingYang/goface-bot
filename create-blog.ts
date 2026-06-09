@@ -38,8 +38,11 @@ async function getDriveFolderContents(folderId: string) {
   return { docId: doc.id!, images }
 }
 
-// 從 Docs API 取得文字（含超連結，輸出 markdown 連結格式）
-// 有超連結的 textRun 輸出為 [文字](url)，讓 GPT-4o 生成 <a> 標籤
+// 從 Docs API 取得文字（含超連結與 list 類型，輸出 markdown 格式）
+// - 有連結的 textRun → [文字](url)
+// - 有序清單項目（1. 2. 3.）→ 1. 文字
+// - 無序清單項目（• ）→ - 文字
+// - 純段落 → 原文字
 async function getDocContent(docId: string): Promise<{
   text: string
   furtherReading: { text: string; url: string } | null
@@ -51,12 +54,21 @@ async function getDocContent(docId: string): Promise<{
 
   let furtherReading: { text: string; url: string } | null = null
 
+  // 判斷 list 是否為 ordered（DECIMAL glyphType）
+  const lists: Record<string, any> = (data as any).lists || {}
+  function isOrderedList(listId: string, nestingLevel: number): boolean {
+    const glyphType = lists[listId]?.listProperties?.nestingLevels?.[nestingLevel]?.glyphType
+    return glyphType === 'DECIMAL'
+  }
+
+  // 追蹤各 ordered list 的計數器
+  const orderedCounters: Record<string, number> = {}
+
   function renderElements(elements: any[]): string {
     return elements.map((el: any) => {
       const content: string = el.textRun?.content || ''
       const url: string | undefined = el.textRun?.textStyle?.link?.url
       if (url && content.trim()) {
-        // 保留原本結尾的換行（Google Doc 每段結尾有 \n）
         const trailing = content.endsWith('\n') ? '\n' : ''
         return `[${content.trim()}](${url})${trailing}`
       }
@@ -66,9 +78,9 @@ async function getDocContent(docId: string): Promise<{
 
   function renderParagraph(para: any): string {
     const elements: any[] = para.elements || []
-    const rendered = renderElements(elements)
+    const rendered = renderElements(elements).replace(/\n$/, '')
 
-    // 若段落含「延伸閱讀」，抓第一個有 url 的 textRun 作為延伸閱讀
+    // 延伸閱讀偵測
     if (rendered.includes('延伸閱讀') && !furtherReading) {
       for (const el of elements) {
         const url = el.textRun?.textStyle?.link?.url
@@ -80,7 +92,19 @@ async function getDocContent(docId: string): Promise<{
       }
     }
 
-    return rendered
+    const bullet = para.bullet
+    if (bullet) {
+      const listId: string = bullet.listId
+      const level: number = bullet.nestingLevel ?? 0
+      if (isOrderedList(listId, level)) {
+        orderedCounters[listId] = (orderedCounters[listId] ?? 0) + 1
+        return `${orderedCounters[listId]}. ${rendered}\n`
+      } else {
+        return `- ${rendered}\n`
+      }
+    }
+
+    return rendered + '\n'
   }
 
   const parts: string[] = []
@@ -306,6 +330,9 @@ async function generateBlogHTML(params: {
 - 日期改為：${date}
 ${furtherReadingInstruction}
 - 文章內容中的 [文字](url) 格式代表超連結，必須轉為 <a href="url" target="_blank" rel="noopener">文字</a>
+- 文章內容中 "1. 2. 3." 開頭的清單 → 使用 <ol class="pl-5 text-dark h5 font-weight-400"><li class="mb-3">...</li></ol>
+- 文章內容中 "- " 開頭的清單 → 使用 <ul class="pl-5 text-dark h5 font-weight-400"><li class="mb-3">...</li></ul>
+- 不是清單格式的純文字連結行（例如案例連結），直接用 <p><a>...</a></p>，不要加 <ul> 或 <ol>
 - FAQ JSON-LD schema 根據新文章的 FAQ 內容重新生成
 - 文章內的分類標籤 placeholder 改為：${tags.map(t => `\${{${t.blog}}}\$`).join('、')}（不可照抄模板的舊標籤）
 ${metaTitle ? `- title 和 og:title 使用：${metaTitle}` : ''}
