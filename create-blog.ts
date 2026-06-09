@@ -264,17 +264,11 @@ async function generateBlogHTML(params: {
 }): Promise<string> {
   const { docContent, blogNumber, imageCount, date, templateHtml, metaTitle, metaDescription, imageAlts, furtherReadingUrl, furtherReadingText } = params
   const bId = `b${blogNumber}`
-  const prevBId = `b${blogNumber - 1}`
 
-  // 延伸閱讀：優先使用 Doc 裡的連結，否則 fallback 到上一篇
-  let furtherReadingInstruction: string
-  if (furtherReadingUrl && furtherReadingText) {
-    furtherReadingInstruction = `- 延伸閱讀連結：href="${furtherReadingUrl}"，連結文字使用：${furtherReadingText}`
-  } else {
-    const prevTitleMatch = templateHtml.match(/<title>([^<]+)<\/title>/)
-    const prevTitle = prevTitleMatch?.[1]?.trim() || prevBId
-    furtherReadingInstruction = `- 延伸閱讀連結改為指向 ${prevBId}.html，連結文字使用：${prevTitle}`
-  }
+  // 延伸閱讀：有才放，沒有就略過
+  const furtherReadingInstruction = (furtherReadingUrl && furtherReadingText)
+    ? `- 延伸閱讀連結：href="${furtherReadingUrl}"，連結文字使用：${furtherReadingText}`
+    : `- 此篇文章沒有延伸閱讀，請完全省略延伸閱讀區塊`
 
   const response = await openai.chat.completions.create({
     model: 'gpt-4o',
