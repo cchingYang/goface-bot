@@ -201,31 +201,6 @@ function parseHashtags(docContent: string): Array<{ ct: string; blog: string }> 
   return result
 }
 
-// 用 GPT-4o 從 Doc 抽取結構化欄位（不用 regex，避免全形/半形問題）
-async function parseDocMeta(docContent: string): Promise<{ metaTitle?: string; metaDescription?: string; h1?: string; imageAlts: string[] }> {
-  const response = await openai.chat.completions.create({
-    model: 'gpt-4o',
-    max_tokens: 800,
-    response_format: { type: 'json_object' },
-    messages: [
-      {
-        role: 'system',
-        content: `從文章內容中找出以下欄位，回傳 JSON：\n- metaTitle：Meta Title 欄位的文字\n- metaDescription：Meta Description 欄位的文字\n- h1：文章主標題（H1）\n- imageAlts：所有圖片 alt 描述的陣列（依出現順序）\n\n欄位名稱可能是全形或半形冒號，大小寫不拘。找不到就回傳 null 或空陣列。\n只回傳 JSON，格式：{"metaTitle":"...","metaDescription":"...","h1":"...","imageAlts":["...","..."]}`
-      },
-      { role: 'user', content: docContent },
-    ],
-  })
-  const raw = response.choices[0]?.message?.content || '{}'
-  const parsed = JSON.parse(raw)
-  return {
-    metaTitle: parsed.metaTitle || undefined,
-    metaDescription: parsed.metaDescription || undefined,
-    h1: parsed.h1 || undefined,
-    imageAlts: Array.isArray(parsed.imageAlts) ? parsed.imageAlts : [],
-  }
-}
-
-
 // 用 GPT-4o 生成 blog.html 用的 post-item HTML 片段
 async function generatePostItem(params: {
   bId: string
@@ -258,28 +233,6 @@ async function generatePostItem(params: {
                     </div>`
 }
 
-// 用 GPT-4o 取得文章標題與第一張圖 alt
-async function extractTitleAndAlt(docContent: string): Promise<{ title: string; imageAlt: string }> {
-  const response = await openai.chat.completions.create({
-    model: 'gpt-4o',
-    max_tokens: 200,
-    response_format: { type: 'json_object' },
-    messages: [
-      {
-        role: 'system',
-        content: `從文章內容中取得以下資訊，回傳 JSON：
-- title：文章的主標題（h1）
-- imageAlt：第一張圖片的 alt 描述（繁體中文，描述圖片場景，約 20-30 字）
-
-只回傳 JSON，格式：{"title":"...","imageAlt":"..."}`
-      },
-      { role: 'user', content: docContent },
-    ],
-  })
-  const raw = response.choices[0]?.message?.content || '{}'
-  return JSON.parse(raw)
-}
-
 // 從 GitHub 讀取最新一篇 blog HTML 作為模板
 async function getLatestBlogTemplate(currentBlogNumber: number): Promise<string> {
   const prevBId = `b${currentBlogNumber - 1}`
@@ -301,13 +254,10 @@ async function generateBlogHTML(params: {
   date: string
   templateHtml: string
   tags: Array<{ ct: string; blog: string }>
-  metaTitle?: string
-  metaDescription?: string
-  imageAlts?: string[]
   furtherReadingUrl?: string
   furtherReadingText?: string
 }): Promise<string> {
-  const { docContent, blogNumber, imageCount, date, templateHtml, tags, metaTitle, metaDescription, imageAlts, furtherReadingUrl, furtherReadingText } = params
+  const { docContent, blogNumber, imageCount, date, templateHtml, tags, furtherReadingUrl, furtherReadingText } = params
   const bId = `b${blogNumber}`
 
   // 延伸閱讀：有才放，沒有就略過
@@ -342,10 +292,8 @@ async function generateBlogHTML(params: {
 - 日期改為：${date}
 - 文章內的分類標籤 placeholder 改為：${tags.map(t => `\${{${t.blog}}}\$`).join('、')}
 ${furtherReadingInstruction}
+- title、og:title、meta description、og:description、圖片 alt 直接從文章內容的對應欄位（Meta Title、Meta Description、alt=）讀取填入
 - FAQ JSON-LD schema 根據新文章的 FAQ 內容重新生成
-${metaTitle ? `- title 和 og:title 使用：${metaTitle}` : ''}
-${metaDescription ? `- meta description 和 og:description 使用：${metaDescription}` : ''}
-${imageAlts && imageAlts.length > 0 ? `- 圖片 alt 依序使用：${imageAlts.map((a, i) => `圖${i + 1}: ${a}`).join('、')}` : ''}
 
 【文章內容格式對應規則】
 - **文字** → <strong>文字</strong>
@@ -404,32 +352,30 @@ export async function createBlogPost(params: {
   const tags = parseHashtags(docContent)
   if (tags.length === 0) throw new Error('Google Doc 內找不到分類標籤（如 ＃出勤服務），請確認文件最開頭有加上標籤')
 
-  // 從 Doc 直接 parse 結構化欄位
-  const docMeta = await parseDocMeta(docContent)
-  const title = docMeta.h1 || docMeta.metaTitle || bId
-  const imageAlt = docMeta.imageAlts[0] || ''
-
-  // 找延伸閱讀超連結（doc 中含「延伸閱讀」字樣的 hyperlink）
+  // 找延伸閱讀超連結
   const furtherReadingUrl = furtherReading?.url
   const furtherReadingText = furtherReading?.text
 
   // 讀取上一篇 blog 作為模板
   const templateHtml = await getLatestBlogTemplate(blogNumber)
 
-  // 生成 HTML
+  // 生成 HTML（meta 欄位由 GPT-4o 直接從 docContent 讀取，省去獨立的 parseDocMeta 呼叫）
   const html = await generateBlogHTML({
     docContent,
     blogNumber,
     imageCount: images.length,
     date,
     templateHtml,
-    metaTitle: docMeta.metaTitle,
     tags,
-    metaDescription: docMeta.metaDescription,
-    imageAlts: docMeta.imageAlts,
     furtherReadingUrl,
     furtherReadingText,
   })
+
+  // 從生成的 HTML 抓 title 和第一張圖 alt（供 post-item 使用）
+  const titleMatch = html.match(/<title>([^<]+)<\/title>/)
+  const title = titleMatch?.[1]?.trim() || bId
+  const altMatch = html.match(/<img[^>]+alt="([^"]+)"[^>]*src="[^"]*_image_1/)
+  const imageAlt = altMatch?.[1] || ''
 
   if (!html) throw new Error('HTML 生成失敗')
 
