@@ -396,15 +396,19 @@ export async function createBlogPost(params: {
     sha: refData.object.sha,
   })
 
-  // 上傳圖片到 src/assets/images/_pages/
+  // 平行下載所有圖片（Drive API 可並行）
+  const imageBuffers = await Promise.all(
+    images.map(async (image, i) => {
+      const ext = image.name!.split('.').pop()?.toLowerCase() || 'jpg'
+      const imagePath = `src/assets/images/_pages/${bId}_image_${i + 1}.${ext}`
+      const buffer = await downloadImage(image.id!)
+      return { imagePath, buffer }
+    })
+  )
+
+  // 依序上傳到 GitHub（GitHub Contents API 不支援同 branch 並行寫入）
   const uploadedImages: string[] = []
-  for (let i = 0; i < images.length; i++) {
-    const image = images[i]
-    const ext = image.name!.split('.').pop()?.toLowerCase() || 'jpg'
-    const imagePath = `src/assets/images/_pages/${bId}_image_${i + 1}.${ext}`
-
-    const buffer = await downloadImage(image.id!)
-
+  for (const { imagePath, buffer } of imageBuffers) {
     await octokit.repos.createOrUpdateFileContents({
       owner: REPO_OWNER,
       repo: REPO_NAME,
@@ -413,7 +417,6 @@ export async function createBlogPost(params: {
       content: buffer.toString('base64'),
       branch: branchName,
     })
-
     uploadedImages.push(imagePath)
   }
 
