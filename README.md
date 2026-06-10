@@ -26,7 +26,8 @@ PR 開啟後，**GitHub Actions**（goface.me repo）自動執行：
 | **GitHub API (Octokit)** | 建立 branch、讀寫檔案、開 PR |
 | **Google Docs API** | 讀取文件結構（段落、清單、超連結、表格）|
 | **Google Drive API** | 列出資料夾內容、下載圖片 |
-| **GitHub Actions** | PR 開啟後自動 build dist + 處理圖片 |
+| **GitHub Actions (goface-bot)** | `create_blog` 任務的背景執行環境（無時間限制） |
+| **GitHub Actions (goface.me)** | PR 開啟後自動 build dist + 處理圖片 |
 
 ---
 
@@ -35,18 +36,23 @@ PR 開啟後，**GitHub Actions**（goface.me repo）自動執行：
 ```
 goface-bot/
 ├── api/slack/
-│   └── events.ts          # Vercel Serverless Function，接收 Slack 事件，分派任務
-├── parser.ts               # GPT-4o 解析自然語言 → taskType + 參數
-├── update-file.ts          # 任務：修改現有頁面文字 → 開 PR
-├── create-blog.ts          # 任務：從 Google Drive 建立新部落格文章 → 開 PR
-├── review-seo.ts           # 任務：SEO 分析（不開 PR）
-├── slack.ts                # 回覆 Slack thread
-├── verify.ts               # 驗證 Slack 請求簽名
-├── vercel.json             # Vercel 設定
-├── test-update-file.ts     # 本機測試：修改文字
-├── test-create-blog.ts     # 本機測試：建立部落格（含兩個測試案例）
-├── get-refresh-token.ts    # 工具：取得 Google OAuth refresh token
-├── .env.example            # 環境變數範本
+│   └── events.ts              # Vercel Serverless Function，接收 Slack 事件，分派任務
+├── .github/workflows/
+│   └── create-blog.yml        # GitHub Actions workflow，執行 create_blog（無時間限制）
+├── parser.ts                   # GPT-4o 解析自然語言 → taskType + 參數
+├── update-file.ts              # 任務：修改現有頁面文字 → 開 PR
+├── create-blog.ts              # 任務：從 Google Drive 建立新部落格文章 → 開 PR
+├── run-create-blog.ts          # Actions 執行入口（由 create-blog.yml 呼叫）
+├── review-seo.ts               # 任務：SEO 分析（不開 PR）
+├── slack.ts                    # 回覆 Slack thread
+├── verify.ts                   # 驗證 Slack 請求簽名
+├── vercel.json                 # Vercel 設定（maxDuration: 60）
+├── test-update-file.ts         # 本機測試：修改文字
+├── test-create-blog.ts         # 本機測試：建立部落格（含兩個測試案例）
+├── create-blog.backup.ts       # 備份：Vercel 直接執行版（升級 Pro 可用）
+├── api/slack/events.backup.ts  # 備份：Vercel 直接執行版（升級 Pro 可用）
+├── get-refresh-token.ts        # 工具：取得 Google OAuth refresh token
+├── .env.example                # 環境變數範本
 └── Slack App 設定說明.md
 ```
 
@@ -123,14 +129,28 @@ npx ts-node test-create-blog.ts 2   # 案例 2：含表格文章
 | 其他超連結文字 | 輸出為 `<a target="_blank" rel="noopener">` |
 | **粗體** | 輸出為 `<strong>` |
 
-### 執行步驟
+### 執行流程
 
+由於 create_blog 需時約 1-2 分鐘（超過 Vercel Hobby 60s 限制），採用 **GitHub Actions** 執行主要工作：
+
+```
+Slack @goface-bot 幫我新增這篇文章 [Drive URL]
+    ↓
+Vercel（接收、驗證、解析任務類型）
+    ↓ 觸發 workflow_dispatch
+GitHub Actions (create-blog.yml)
+    ↓ 讀 Google Doc → GPT-4o 生成 HTML → 上傳圖片 → 開 PR
+Slack thread 回覆 ✅
+```
+
+**步驟細節：**
 1. bot 讀取 Drive 資料夾 → 找到 Google Doc 和圖片（依檔名數字順序排列）
 2. **Google Docs API** 解析文件結構（段落、清單類型、超連結 URL、粗體、表格）
-3. **GPT-4o** 解析 Meta 欄位、hashtag 分類、圖片 alt
-4. **GPT-4o** 以前一篇文章為模板，忠實將 Doc 內容填入 HTML 結構
-5. 建立新 branch → 上傳圖片至 `src/assets/images/_pages/` → 上傳 HTML → 更新 `blog.html` post-item → 開 PR
-6. **GitHub Actions** 自動轉 webp、壓縮圖片、build dist
+3. **GPT-4o** 以前一篇文章為模板，忠實將 Doc 內容填入 HTML 結構
+4. 建立新 branch → 上傳圖片至 `src/assets/images/_pages/` → 上傳 HTML → 更新 `blog.html` post-item → 開 PR
+5. **GitHub Actions (goface.me)** 自動轉 webp、壓縮圖片、build dist
+
+> **若升級 Vercel Pro（300s）**：可改回直接在 Vercel 執行，將 `create-blog.backup.ts` 和 `api/slack/events.backup.ts` 還原即可，不需要 GitHub Actions workflow。
 
 ---
 
@@ -147,7 +167,20 @@ npx ts-node test-create-blog.ts 2   # 案例 2：含表格文章
 
 1. 將此 repo 連結到 Vercel
 2. 在 Vercel > Settings > Environment Variables 填入所有環境變數
-3. 依照 `Slack App 設定說明.md` 完成 Slack App 設定，將 Vercel endpoint 填入 Slack Event Subscriptions URL
+3. 在 GitHub repo > Settings > Secrets and variables > Actions 填入以下 Secrets（供 create-blog.yml 使用）：
+
+| Secret 名稱 | 說明 |
+|-------------|------|
+| `GH_ACCESS_TOKEN` | GitHub PAT（需有 `contents:write` + `workflow` scope） |
+| `OPENAI_API_KEY` | OpenAI API Key |
+| `GOOGLE_CLIENT_ID` | Google OAuth Client ID |
+| `GOOGLE_CLIENT_SECRET` | Google OAuth Client Secret |
+| `GOOGLE_REFRESH_TOKEN` | Google OAuth Refresh Token |
+| `GH_REPO_OWNER` | goface.me repo 擁有者，e.g. `astracloud` |
+| `GH_REPO_NAME` | goface.me repo 名稱，e.g. `goface.me` |
+| `SLACK_BOT_TOKEN` | Slack Bot User OAuth Token |
+
+4. 依照 `Slack App 設定說明.md` 完成 Slack App 設定，將 Vercel endpoint 填入 Slack Event Subscriptions URL
 
 ---
 

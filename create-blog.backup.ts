@@ -1,0 +1,484 @@
+import { google } from 'googleapis'
+import { Octokit } from '@octokit/rest'
+import OpenAI from 'openai'
+
+const octokit = new Octokit({ auth: process.env.GITHUB_TOKEN })
+const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
+
+const REPO_OWNER = process.env.GITHUB_REPO_OWNER!
+const REPO_NAME = process.env.GITHUB_REPO_NAME!
+const BASE_BRANCH = process.env.GITHUB_BASE_BRANCH || 'main'
+
+function getOAuthClient() {
+  const auth = new google.auth.OAuth2(
+    process.env.GOOGLE_CLIENT_ID,
+    process.env.GOOGLE_CLIENT_SECRET,
+  )
+  auth.setCredentials({ refresh_token: process.env.GOOGLE_REFRESH_TOKEN })
+  return auth
+}
+
+// 從 Drive 資料夾取得 Google Doc ID 和圖片清單
+async function getDriveFolderContents(folderId: string) {
+  const auth = getOAuthClient()
+  const drive = google.drive({ version: 'v3', auth })
+
+  const { data } = await drive.files.list({
+    q: `'${folderId}' in parents and trashed = false`,
+    fields: 'files(id, name, mimeType)',
+  })
+
+  const files = data.files || []
+  const doc = files.find(f => f.mimeType === 'application/vnd.google-apps.document')
+  const images = files
+    .filter(f => f.mimeType?.startsWith('image/'))
+    .sort((a, b) => (a.name || '').localeCompare(b.name || '', undefined, { numeric: true }))
+
+  if (!doc) throw new Error('資料夾內找不到 Google Doc')
+  return { docId: doc.id!, images }
+}
+
+// 從 Docs API 取得文字（含超連結與 list 類型，輸出 markdown 格式）
+// - 有連結的 textRun → [文字](url)
+// - 有序清單項目（1. 2. 3.）→ 1. 文字
+// - 無序清單項目（• ）→ - 文字
+// - 純段落 → 原文字
+async function getDocContent(docId: string): Promise<{
+  text: string
+  furtherReading: { text: string; url: string } | null
+}> {
+  const auth = getOAuthClient()
+  const docs = google.docs({ version: 'v1', auth })
+
+  const { data } = await docs.documents.get({ documentId: docId })
+
+  let furtherReading: { text: string; url: string } | null = null
+
+  // 判斷 list 是否為 ordered（DECIMAL glyphType）
+  const lists: Record<string, any> = (data as any).lists || {}
+  function isOrderedList(listId: string, nestingLevel: number): boolean {
+    const glyphType = lists[listId]?.listProperties?.nestingLevels?.[nestingLevel]?.glyphType
+    return glyphType === 'DECIMAL'
+  }
+
+  // 追蹤各 ordered list 的計數器
+  const orderedCounters: Record<string, number> = {}
+
+  function renderElements(elements: any[]): string {
+    return elements.map((el: any) => {
+      const content: string = el.textRun?.content || ''
+      const url: string | undefined = el.textRun?.textStyle?.link?.url
+      if (url && content.trim()) {
+        const trailing = content.endsWith('\n') ? '\n' : ''
+        return `[${content.trim()}](${url})${trailing}`
+      }
+      // bold textRun 用 ** 標記，讓 GPT-4o 輸出 <strong>
+      const isBold: boolean = el.textRun?.textStyle?.bold === true
+      if (isBold && content.trim()) {
+        return `**${content.trim()}**`
+      }
+      return content
+    }).join('')
+  }
+
+  function renderParagraph(para: any): string {
+    const elements: any[] = para.elements || []
+    const rendered = renderElements(elements).replace(/\n$/, '')
+
+    // 延伸閱讀偵測
+    if (rendered.includes('延伸閱讀') && !furtherReading) {
+      for (const el of elements) {
+        const url = el.textRun?.textStyle?.link?.url
+        const text = el.textRun?.content?.trim()
+        if (url && text) {
+          furtherReading = { text, url }
+          break
+        }
+      }
+    }
+
+    const bullet = para.bullet
+    if (bullet) {
+      const listId: string = bullet.listId
+      const level: number = bullet.nestingLevel ?? 0
+      if (isOrderedList(listId, level)) {
+        orderedCounters[listId] = (orderedCounters[listId] ?? 0) + 1
+        return `${orderedCounters[listId]}. ${rendered}\n`
+      } else {
+        return `- ${rendered}\n`
+      }
+    }
+
+    return rendered + '\n'
+  }
+
+  const parts: string[] = []
+
+  for (const block of data.body?.content || []) {
+    if (block.table) {
+      for (const row of block.table.tableRows || []) {
+        for (const cell of row.tableCells || []) {
+          for (const cellBlock of cell.content || []) {
+            if (cellBlock.paragraph) {
+              parts.push(renderParagraph(cellBlock.paragraph))
+            }
+          }
+        }
+      }
+      continue
+    }
+    if (block.paragraph) {
+      parts.push(renderParagraph(block.paragraph))
+    }
+  }
+
+  return { text: parts.join(''), furtherReading }
+}
+
+// 下載圖片 buffer
+async function downloadImage(fileId: string): Promise<Buffer> {
+  const auth = getOAuthClient()
+  const drive = google.drive({ version: 'v3', auth })
+
+  const { data } = await drive.files.get(
+    { fileId, alt: 'media' },
+    { responseType: 'arraybuffer' }
+  )
+
+  return Buffer.from(data as ArrayBuffer)
+}
+
+// 取得目前最新 blog 編號
+async function getNextBlogNumber(): Promise<number> {
+  const { data } = await octokit.repos.getContent({
+    owner: REPO_OWNER,
+    repo: REPO_NAME,
+    path: 'src/blog/zh-TW',
+    ref: BASE_BRANCH,
+  })
+
+  if (!Array.isArray(data)) throw new Error('無法讀取 blog 目錄')
+
+  const numbers = data
+    .map(f => f.name.match(/^b(\d+)\.html$/))
+    .filter(Boolean)
+    .map(m => parseInt(m![1]))
+
+  return Math.max(...numbers) + 1
+}
+
+// 從 GitHub 讀取檔案（含 sha）
+async function fetchGithubFile(path: string): Promise<{ content: string; sha: string }> {
+  const { data } = await octokit.repos.getContent({
+    owner: REPO_OWNER,
+    repo: REPO_NAME,
+    path,
+    ref: BASE_BRANCH,
+  })
+  if (Array.isArray(data) || data.type !== 'file') throw new Error(`找不到檔案：${path}`)
+  return { content: Buffer.from(data.content, 'base64').toString('utf-8'), sha: data.sha }
+}
+
+// hashtag → ct-* 對應表
+const TAG_MAP: Record<string, { ct: string; blog: string }> = {
+  '出勤服務': { ct: 'ct-checkin',     blog: 'blog.checkin' },
+  '門禁服務': { ct: 'ct-pass',        blog: 'blog.pass' },
+  '場域安全': { ct: 'ct-application', blog: 'blog.application' },
+  '顧客管理': { ct: 'ct-customer',    blog: 'blog.customer' },
+  '技術研究': { ct: 'ct-technical',   blog: 'blog.technical' },
+  '案例分享': { ct: 'ct-case',        blog: 'blog.case' },
+  '其他':     { ct: 'ct-other',       blog: 'blog.other' },
+}
+
+// 從 Doc 內容解析 # 或 ＃ 標籤
+function parseHashtags(docContent: string): Array<{ ct: string; blog: string }> {
+  const matches = docContent.match(/[#＃]([^\s#＃\n]+)/g) || []
+  const result: Array<{ ct: string; blog: string }> = []
+  for (const tag of matches) {
+    const label = tag.replace(/^[#＃]/, '').trim()
+    if (TAG_MAP[label]) result.push(TAG_MAP[label])
+  }
+  return result
+}
+
+// 用 GPT-4o 生成 blog.html 用的 post-item HTML 片段
+async function generatePostItem(params: {
+  bId: string
+  docContent: string
+  date: string
+  title: string
+  imageAlt: string
+  tags: Array<{ ct: string; blog: string }>
+}): Promise<string> {
+  const { bId, date, title, imageAlt, tags } = params
+
+  const ctClasses = tags.map(t => t.ct).join(' ')
+  const blogTags = tags.map(t => `\${{${t.blog}}}\$`).join('、')
+
+  return `<div class="post-item border ${ctClasses}">
+                        <div class="post-item-wrap">
+                            <div class="post-image embed-responsive embed-responsive-4by3">
+                                <a href="${bId}.html" class="embed-responsive-item">
+                                    <img alt="${imageAlt}" src="/images/pages/${bId}_image_1.jpg">
+                                </a>
+                            </div>
+                            <div class="post-item-description bg-gray-10">
+                                <span class="post-meta-date">${date}</span>
+                                <div class="text-grey-60 d-flex align-items-center"><span
+                                        class="icon-sell mr-1"></span>${blogTags}
+                                </div>
+                                <h2 class="text-truncate text-truncate--2"><a href="${bId}.html">${title}</a></h2>
+                            </div>
+                        </div>
+                    </div>`
+}
+
+// 從 GitHub 讀取最新一篇 blog HTML 作為模板
+async function getLatestBlogTemplate(currentBlogNumber: number): Promise<string> {
+  const prevBId = `b${currentBlogNumber - 1}`
+  const { data } = await octokit.repos.getContent({
+    owner: REPO_OWNER,
+    repo: REPO_NAME,
+    path: `src/blog/zh-TW/${prevBId}.html`,
+    ref: BASE_BRANCH,
+  })
+  if (Array.isArray(data) || data.type !== 'file') throw new Error(`找不到模板 ${prevBId}.html`)
+  return Buffer.from(data.content, 'base64').toString('utf-8')
+}
+
+// 用 GPT-4o 把 Doc 內容轉成 blog HTML
+async function generateBlogHTML(params: {
+  docContent: string
+  blogNumber: number
+  imageCount: number
+  date: string
+  templateHtml: string
+  tags: Array<{ ct: string; blog: string }>
+  furtherReadingUrl?: string
+  furtherReadingText?: string
+}): Promise<string> {
+  const { docContent, blogNumber, imageCount, date, templateHtml, tags, furtherReadingUrl, furtherReadingText } = params
+  const bId = `b${blogNumber}`
+
+  // 延伸閱讀：有才放，沒有就略過
+  const furtherReadingInstruction = (furtherReadingUrl && furtherReadingText)
+    ? `- 延伸閱讀連結：href="${furtherReadingUrl}"，連結文字使用：${furtherReadingText}`
+    : `- 此篇文章沒有延伸閱讀，請完全省略延伸閱讀區塊`
+
+  const response = await openai.chat.completions.create({
+    model: 'gpt-4o',
+    max_tokens: 16000,
+    messages: [
+      {
+        role: 'system',
+        content: `你是 goface.me 的部落格文章 HTML 生成助手。
+你的任務是：把「新文章內容」的文字，填進「參考模板」的 HTML 結構中，輸出完整 HTML。
+
+【最高原則】
+- 新文章內容有什麼就輸出什麼，一字不多、一字不少
+- 嚴禁自行增加、刪除、改寫、重新排列任何段落或文字
+- 嚴禁腦補任何原文沒有的內容
+- 只有以下幾項允許修改（見下方規則），其他一律照抄
+
+【模板結構規則】（以下照抄，不用改）
+- HTML 結構、class 名稱、include 路徑、語系佔位符全部沿用模板
+- 語系佔位符（如 \${{ _lang_ }}\$）照抄不要更動
+- include 路徑（如 @@include('../../../src/head.html')）照抄不要更動
+
+【需要根據新文章替換的部分】
+- 圖片命名改為新編號：${bId}_image_1.jpg、${bId}_image_2.jpg...（共 ${imageCount} 張）
+- 第一張圖放在 h1 上方，其餘圖片依原文順序穿插
+- og:url 改為：https://www.goface.me/zh-TW/blog/zh-TW/${bId}.html
+- 日期改為：${date}
+- 文章內的分類標籤 placeholder 改為：${tags.map(t => `\${{${t.blog}}}\$`).join('、')}
+${furtherReadingInstruction}
+- title、og:title、meta description、og:description、圖片 alt 直接從文章內容的對應欄位（Meta Title、Meta Description、alt=）讀取填入
+- FAQ JSON-LD schema 根據新文章的 FAQ 內容重新生成
+
+【文章內容格式對應規則】
+- **文字** → <strong>文字</strong>
+- [文字](url) → <a href="url" target="_blank" rel="noopener">文字</a>
+- "1. 2. 3." 開頭的清單 → <ol class="pl-5 text-dark h5 font-weight-400"><li class="mb-3">...</li></ol>
+- "- " 開頭的清單 → <ul class="pl-5 text-dark h5 font-weight-400"><li class="mb-3">...</li></ul>
+- 不是清單格式的純文字連結 → <p><a href="..." target="_blank" rel="noopener">...</a></p>，不要加 ul 或 ol
+- "CTA｜[按鈕文字](url)" 代表 CTA 按鈕區塊，連同前一行描述文字，一起輸出為：
+  <div class="text-center mt-5">
+    <h4 class="mb-4">（前一行的描述文字）</h4>
+    <a id="business_inquire" href="url" target="_blank" rel="noreferrer noopener">
+      <button class="btn btn-secondary btn-rounded">
+        <span class="h5">按鈕文字</span>
+      </button>
+    </a>
+  </div>
+- 表格 → class="table table-bordered"，標題列用 <th scope="col">，第一欄用 <th scope="row">，最後欄加 class="text-secondary" 並用 <strong> 包住關鍵詞
+
+只回傳完整 HTML，不要加任何說明文字或 markdown 標記。`
+      },
+      {
+        role: 'user',
+        content: `# 參考模板\n\n${templateHtml}\n\n# 新文章內容\n\n${docContent}`,
+      },
+    ],
+  })
+
+  const raw = response.choices[0]?.message?.content || ''
+  // GPT-4o 有時會包 markdown code block，strip 掉
+  return raw.replace(/^```[\w]*\n?/, '').replace(/\n?```$/, '').trim()
+}
+
+export async function createBlogPost(params: {
+  driveFolderUrl: string
+  slackUser: string
+}): Promise<{ prUrl: string; prNumber: number; blogNumber: number }> {
+  const { driveFolderUrl, slackUser } = params
+
+  // 從 URL 取出 folder ID
+  const folderIdMatch = driveFolderUrl.match(/folders\/([a-zA-Z0-9_-]+)/)
+  if (!folderIdMatch) throw new Error('無效的 Google Drive 資料夾網址')
+  const folderId = folderIdMatch[1]
+
+  // 讀取資料夾內容
+  const { docId, images } = await getDriveFolderContents(folderId)
+
+  // 讀取 Doc 內容（含延伸閱讀超連結）
+  const { text: docContent, furtherReading } = await getDocContent(docId)
+
+  // 決定文章編號
+  const blogNumber = await getNextBlogNumber()
+  const bId = `b${blogNumber}`
+  const date = new Date().toLocaleDateString('zh-TW', { year: 'numeric', month: '2-digit', day: '2-digit' }).replace(/\//g, '/')
+
+  // 解析 hashtag 分類
+  const tags = parseHashtags(docContent)
+  if (tags.length === 0) throw new Error('Google Doc 內找不到分類標籤（如 ＃出勤服務），請確認文件最開頭有加上標籤')
+
+  // 找延伸閱讀超連結
+  const furtherReadingUrl = furtherReading?.url
+  const furtherReadingText = furtherReading?.text
+
+  // 讀取上一篇 blog 作為模板
+  const templateHtml = await getLatestBlogTemplate(blogNumber)
+
+  // 生成 HTML（meta 欄位由 GPT-4o 直接從 docContent 讀取，省去獨立的 parseDocMeta 呼叫）
+  const html = await generateBlogHTML({
+    docContent,
+    blogNumber,
+    imageCount: images.length,
+    date,
+    templateHtml,
+    tags,
+    furtherReadingUrl,
+    furtherReadingText,
+  })
+
+  // 從生成的 HTML 抓 title 和第一張圖 alt（供 post-item 使用）
+  const titleMatch = html.match(/<title>([^<]+)<\/title>/)
+  const title = titleMatch?.[1]?.trim() || bId
+  const altMatch = html.match(/<img[^>]+alt="([^"]+)"[^>]*src="[^"]*_image_1/)
+  const imageAlt = altMatch?.[1] || ''
+
+  if (!html) throw new Error('HTML 生成失敗')
+
+  // 建立 branch
+  const timestamp = Date.now()
+  const branchName = `blog/add-${bId}-${timestamp}`
+
+  const { data: refData } = await octokit.git.getRef({
+    owner: REPO_OWNER,
+    repo: REPO_NAME,
+    ref: `heads/${BASE_BRANCH}`,
+  })
+
+  await octokit.git.createRef({
+    owner: REPO_OWNER,
+    repo: REPO_NAME,
+    ref: `refs/heads/${branchName}`,
+    sha: refData.object.sha,
+  })
+
+  // 平行下載所有圖片（Drive API 可並行）
+  const imageBuffers = await Promise.all(
+    images.map(async (image, i) => {
+      const ext = image.name!.split('.').pop()?.toLowerCase() || 'jpg'
+      const imagePath = `src/assets/images/_pages/${bId}_image_${i + 1}.${ext}`
+      const buffer = await downloadImage(image.id!)
+      return { imagePath, buffer }
+    })
+  )
+
+  // 依序上傳到 GitHub（GitHub Contents API 不支援同 branch 並行寫入）
+  const uploadedImages: string[] = []
+  for (const { imagePath, buffer } of imageBuffers) {
+    await octokit.repos.createOrUpdateFileContents({
+      owner: REPO_OWNER,
+      repo: REPO_NAME,
+      path: imagePath,
+      message: `blog: add images for ${bId}`,
+      content: buffer.toString('base64'),
+      branch: branchName,
+    })
+    uploadedImages.push(imagePath)
+  }
+
+  // 上傳 HTML
+  const htmlPath = `src/blog/zh-TW/${bId}.html`
+  await octokit.repos.createOrUpdateFileContents({
+    owner: REPO_OWNER,
+    repo: REPO_NAME,
+    path: htmlPath,
+    message: `blog: add ${bId}`,
+    content: Buffer.from(html).toString('base64'),
+    branch: branchName,
+  })
+
+  // 生成 post-item 並插入 blog.html
+  const postItem = await generatePostItem({ bId, docContent, date, title, imageAlt, tags })
+  if (!postItem) throw new Error('post-item 生成失敗')
+
+  const blogListPath = 'src/blog/zh-TW/blog.html'
+  const blogListFile = await fetchGithubFile(blogListPath)
+  const insertMarker = '<!-- Post item-->'
+  if (!blogListFile.content.includes(insertMarker)) throw new Error('找不到 blog.html 插入點')
+
+  const updatedBlogList = blogListFile.content.replace(
+    insertMarker,
+    `${insertMarker}\n                    ${postItem}`
+  )
+
+  await octokit.repos.createOrUpdateFileContents({
+    owner: REPO_OWNER,
+    repo: REPO_NAME,
+    path: blogListPath,
+    message: `blog: add ${bId} to blog list`,
+    content: Buffer.from(updatedBlogList).toString('base64'),
+    sha: blogListFile.sha,
+    branch: branchName,
+  })
+
+  // 開 PR
+  const { data: pr } = await octokit.pulls.create({
+    owner: REPO_OWNER,
+    repo: REPO_NAME,
+    title: `[Blog] 新增文章 ${bId}`,
+    body: `## 新增部落格文章
+
+**文章編號**：${bId}
+**來源**：${driveFolderUrl}
+
+**新增／修改檔案**
+- \`${htmlPath}\`
+- \`${blogListPath}\`（已新增 post-item）
+${uploadedImages.map(p => `- \`${p}\``).join('\n')}
+
+**備註**
+- 圖片將由 GitHub Actions 自動轉 webp 並壓縮
+- dist 將由 GitHub Actions 自動產出
+
+---
+*此 PR 由 goface-bot 自動建立，由 @${slackUser} 發起*`,
+    head: branchName,
+    base: BASE_BRANCH,
+  })
+
+  return { prUrl: pr.html_url, prNumber: pr.number, blogNumber }
+}
