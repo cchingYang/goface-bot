@@ -2,7 +2,7 @@ import { google } from 'googleapis'
 import { Octokit } from '@octokit/rest'
 import OpenAI from 'openai'
 
-const octokit = new Octokit({ auth: process.env.GITHUB_TOKEN })
+const octokit = new Octokit({ auth: process.env.GH_ACCESS_TOKEN || process.env.GITHUB_TOKEN })
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
 
 const REPO_OWNER = process.env.GITHUB_REPO_OWNER!

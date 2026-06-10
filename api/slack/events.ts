@@ -9,12 +9,36 @@ function getRawBody(req: IncomingMessage): Promise<string> {
     req.on('error', reject)
   })
 }
+import { Octokit } from '@octokit/rest'
 import { parseSlackMessage } from '../../parser'
 import { createSEOPullRequest } from '../../update-file'
-import { createBlogPost } from '../../create-blog'
 import { reviewPageSEO } from '../../review-seo'
 import { replyToSlack } from '../../slack'
 import { verifySlackSignature } from '../../verify'
+
+const BOT_REPO_OWNER = 'cchingYang'
+const BOT_REPO_NAME = 'goface-bot'
+
+async function triggerCreateBlogWorkflow(params: {
+  driveFolderUrl: string
+  slackUser: string
+  channel: string
+  ts: string
+}) {
+  const octokit = new Octokit({ auth: process.env.GITHUB_TOKEN })
+  await octokit.actions.createWorkflowDispatch({
+    owner: BOT_REPO_OWNER,
+    repo: BOT_REPO_NAME,
+    workflow_id: 'create-blog.yml',
+    ref: 'main',
+    inputs: {
+      driveFolderUrl: params.driveFolderUrl,
+      slackUser: params.slackUser,
+      channel: params.channel,
+      ts: params.ts,
+    },
+  })
+}
 
 // Vercel 預設會 parse body，關掉讓我們自己處理 raw body（Slack 簽名驗證需要）
 export const config = { api: { bodyParser: false } }
@@ -89,13 +113,13 @@ async function processInBackground(event: any) {
             '⚠️ 請提供 Google Drive 資料夾網址。\n\n例：幫我新增這篇文章 https://drive.google.com/drive/folders/xxx')
           return
         }
-        await replyToSlack(channel, ts, '⏳ 正在讀取文章內容並生成 HTML，請稍候（約 1-2 分鐘）...')
-        const { prUrl, prNumber, blogNumber } = await createBlogPost({
+        await triggerCreateBlogWorkflow({
           driveFolderUrl: parsed.driveFolderUrl,
           slackUser,
+          channel,
+          ts,
         })
-        await replyToSlack(channel, ts,
-          `✅ 文章 b${blogNumber} 已建立，PR 已開啟！\n\n*PR #${prNumber}*\n${prUrl}\n\n請 <@U0819C25K51> review 後 merge。`)
+        await replyToSlack(channel, ts, '⏳ 正在讀取文章內容並生成 HTML，請稍候（約 1-2 分鐘）...')
         break
       }
 
