@@ -43,9 +43,6 @@ async function triggerCreateBlogWorkflow(params: {
 // Vercel 預設會 parse body，關掉讓我們自己處理 raw body（Slack 簽名驗證需要）
 export const config = { api: { bodyParser: false } }
 
-// 防止 Slack retry 重複觸發（記住最近處理過的 event_id）
-const processedEvents = new Set<string>()
-
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST') return res.status(405).end()
 
@@ -67,16 +64,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(200).json({ ok: true })
   }
 
-  // 過濾 Slack retry 重複事件
-  const eventId = body.event_id
-  if (eventId && processedEvents.has(eventId)) {
-    return res.status(200).json({ ok: true })
-  }
-  if (eventId) processedEvents.add(eventId)
+  // Slack retry 直接忽略（Vercel 送出 response 後不保證繼續執行，所以改為同步處理）
+  const retryNum = req.headers['x-slack-retry-num']
+  if (retryNum) return res.status(200).json({ ok: true })
 
-  // 先回 200 讓 Slack 不 retry，再背景執行（Vercel 會等 async 跑完才終止）
-  res.status(200).json({ ok: true })
+  // 同步執行，完成後才回 200
   await processInBackground(event)
+  return res.status(200).json({ ok: true })
 }
 
 async function processInBackground(event: any) {
