@@ -1,5 +1,9 @@
 import { Octokit } from '@octokit/rest'
 
+function escapeRegExp(str: string): string {
+  return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
 const octokit = new Octokit({
   auth: process.env.GITHUB_TOKEN,
 })
@@ -125,10 +129,17 @@ export async function createSEOPullRequest(params: {
     // 套用所有替換
     let srcContent = srcFile.content
     for (const { original, replacement } of urlChanges) {
-      if (!srcContent.includes(original)) {
-        throw new Error(`找不到原文「${original}」，請確認文字與頁面內容完全一致。`)
+      if (srcContent.includes(original)) {
+        srcContent = srcContent.replace(original, replacement)
+        continue
       }
-      srcContent = srcContent.replace(original, replacement)
+      // 找不到純文字時，嘗試找包含該文字的整個 <p>...</p> 標籤
+      const pTagMatch = srcContent.match(new RegExp(`<p[^>]*>[^<]*(?:<[^>]+>[^<]*)*${escapeRegExp(original)}(?:[^<]*<[^>]+>)*[^<]*<\\/p>`))
+      if (pTagMatch) {
+        srcContent = srcContent.replace(pTagMatch[0], replacement)
+        continue
+      }
+      throw new Error(`找不到原文「${original}」，請確認文字與頁面內容完全一致。`)
     }
 
     // Commit src
