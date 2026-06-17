@@ -133,10 +133,10 @@ export async function createSEOPullRequest(params: {
         srcContent = srcContent.replace(original, replacement)
         continue
       }
-      // 找不到純文字時，嘗試找包含該文字的整個 <p>...</p> 標籤
-      const pTagMatch = srcContent.match(new RegExp(`<p[^>]*>[^<]*(?:<[^>]+>[^<]*)*${escapeRegExp(original)}(?:[^<]*<[^>]+>)*[^<]*<\\/p>`))
-      if (pTagMatch) {
-        srcContent = srcContent.replace(pTagMatch[0], replacement)
+      // 找不到純文字時，嘗試找包含該文字的整行 HTML 標籤（p、li、h1~h6 等）
+      const tagMatch = srcContent.match(new RegExp(`<(p|li|h[1-6]|span|td|th)[^>]*>[^<]*(?:<[^>]+>[^<]*)*${escapeRegExp(original)}(?:[^<]*<[^>]+>)*[^<]*<\\/\\1>`))
+      if (tagMatch) {
+        srcContent = srcContent.replace(tagMatch[0], replacement)
         continue
       }
       throw new Error(`找不到原文「${original}」，請確認文字與頁面內容完全一致。`)
