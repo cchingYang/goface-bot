@@ -48,6 +48,7 @@ taskType 只有四種：
 
 判斷規則：
 - 有提到「改」「修改」「替換」「更新」某段文字 → update_file
+- 有提到「刪除」「移除」「拿掉」「去掉」某段文字 → update_file（replacement 設為空字串 ""）
 - 有提到「上方加」「下方加」「前面加」「後面加」「加上」「插入」「新增一行」「結尾加」「最後加」「文章最後」「文末」→ update_file（見下方插入規則）
 - 有提到「審查」「分析」「建議」「看看」「哪裡可以改」→ review_only
 - 有提到「新增」「發布」「上傳」「建立」文章，並附上 Google Drive 網址 → create_blog
@@ -112,6 +113,14 @@ taskType 只有四種：
 範例九（在文章結尾插入）：
 輸入：在 https://www.goface.me/zh-TW/blog/zh-TW/b80.html 的文章結尾加上「想進一步了解 GoFace 如何協助您的企業？立即預約免費顧問諮詢！」
 輸出：{"taskType":"update_file","changes":[{"url":"https://www.goface.me/zh-TW/blog/zh-TW/b80.html","original":"<!-- end: content -->","replacement":"<p class=\"h5 font-weight-400 mt-3\">想進一步了解 GoFace 如何協助您的企業？立即預約免費顧問諮詢！</p>\n                                <!-- end: content -->"}]}
+
+範例十（刪除某段文字）：
+輸入：刪除 https://www.goface.me/zh-TW/blog/zh-TW/b80.html 的「我是機器人愛吃蘋果蘋果。」
+輸出：{"taskType":"update_file","changes":[{"url":"https://www.goface.me/zh-TW/blog/zh-TW/b80.html","original":"我是機器人愛吃蘋果蘋果。","replacement":""}]}
+
+範例十一（多段刪除）：
+輸入：刪除 https://www.goface.me/zh-TW/blog/zh-TW/b80.html 的「文字A」和「文字B」
+輸出：{"taskType":"update_file","changes":[{"url":"https://www.goface.me/zh-TW/blog/zh-TW/b80.html","original":"文字A","replacement":""},{"url":"https://www.goface.me/zh-TW/blog/zh-TW/b80.html","original":"文字B","replacement":""}]}
 
 輸入：你好
 輸出：{"taskType":"unknown"}`
