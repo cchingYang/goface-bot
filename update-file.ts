@@ -135,15 +135,40 @@ export async function createSEOPullRequest(params: {
     // 套用所有替換
     let srcContent = srcFile.content
     for (const { original, replacement } of urlChanges) {
+      // 判斷插入方向：replacement 以 original 開頭 → 下方插入；以 original 結尾 → 上方插入；否則是純替換
+      const isInsertAfter = replacement.startsWith(original)
+      const isInsertBefore = !isInsertAfter && replacement.endsWith(original)
+
       if (srcContent.includes(original)) {
+        if (isInsertAfter || isInsertBefore) {
+          // 找到包含 original 的整行，在整行前後插入，避免新 block 元素嵌入原標籤內
+          const lines = srcContent.split('\n')
+          const lineIndex = lines.findIndex(line => line.includes(original))
+          if (lineIndex !== -1) {
+            const newContent = replacement.slice(isInsertAfter ? original.length : 0, isInsertAfter ? undefined : -original.length).trimStart()
+            lines[lineIndex] = isInsertAfter
+              ? lines[lineIndex] + '\n' + newContent
+              : newContent + '\n' + lines[lineIndex]
+            srcContent = lines.join('\n')
+            continue
+          }
+        }
         srcContent = srcContent.replace(original, replacement)
         continue
       }
-      // 找不到純文字時，逐行剝除 HTML 標籤後比對，找到包含該文字的整行就整行替換
+      // 找不到純文字時，逐行剝除 HTML 標籤後比對，找到包含該文字的整行就整行前後插入或替換
       const lines = srcContent.split('\n')
       const lineIndex = lines.findIndex(line => line.replace(/<[^>]+>/g, '').includes(original))
       if (lineIndex !== -1) {
-        lines[lineIndex] = replacement
+        if (isInsertAfter) {
+          const newContent = replacement.slice(original.length).trimStart()
+          lines[lineIndex] = lines[lineIndex] + '\n' + newContent
+        } else if (isInsertBefore) {
+          const newContent = replacement.slice(0, -original.length).trimEnd()
+          lines[lineIndex] = newContent + '\n' + lines[lineIndex]
+        } else {
+          lines[lineIndex] = replacement
+        }
         srcContent = lines.join('\n')
         continue
       }
