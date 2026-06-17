@@ -57,10 +57,11 @@ taskType 只有四種：
 
 定位錨點規則：
 - 用戶指定「某段文字」→ original 直接用該文字
-- 用戶說「CTA 按鈕上方」→ original = <a id="business_inquire"
+- 用戶說「CTA 按鈕上方」→ original = <a id="business_inquire"，replacement = [新內容段落]\n                                        <a id="business_inquire"
+- 用戶說「CTA 按鈕下方」→ original = </a>\n                                        <h5 class="font-weight-400 mt-4">為您的企業量身打造高效門禁方案</h5>，replacement = </a>\n                                        [新內容段落]\n                                        <h5 class="font-weight-400 mt-4">為您的企業量身打造高效門禁方案</h5>
 - 用戶說「文章結尾」「最後」「文末」→ original = <!-- end: content -->
 
-插入方向規則：
+插入方向規則（非 CTA 錨點）：
 - 上方/前面插入：replacement = [新內容段落]\n[original]
 - 下方/後面插入：replacement = [original]\n[新內容段落]
 - 文章結尾插入（original 為 <!-- end: content -->）：replacement = [新內容段落]\n                                <!-- end: content -->
@@ -95,6 +96,10 @@ taskType 只有四種：
 範例六（在 CTA 上方插入延伸閱讀）：
 輸入：在 https://www.goface.me/zh-TW/blog/zh-TW/b80.html 的 CTA 按鈕上方加上延伸閱讀「為什麼 AI 人臉辨識是考勤的未來？GoFace徹底解決代打卡與傳統刷卡機耗損問題」並使用超連結至 https://www.goface.me/zh-TW/blog/zh-TW/b81.html
 輸出：{"taskType":"update_file","changes":[{"url":"https://www.goface.me/zh-TW/blog/zh-TW/b80.html","original":"<a id=\"business_inquire\"","replacement":"<p class=\"h5 font-weight-400 mt-3 mb-4\">延伸閱讀：<a href=\"https://www.goface.me/zh-TW/blog/zh-TW/b81.html\" target=\"_blank\" rel=\"noreferrer noopener\">為什麼 AI 人臉辨識是考勤的未來？GoFace徹底解決代打卡與傳統刷卡機耗損問題</a></p>\n                                        <a id=\"business_inquire\""}]}
+
+範例六-b（在 CTA 按鈕下方插入純文字）：
+輸入：在 https://www.goface.me/zh-TW/blog/zh-TW/b80.html 的 CTA 按鈕下方加上「我是機器人」
+輸出：{"taskType":"update_file","changes":[{"url":"https://www.goface.me/zh-TW/blog/zh-TW/b80.html","original":"</a>\n                                        <h5 class=\"font-weight-400 mt-4\">為您的企業量身打造高效門禁方案</h5>","replacement":"</a>\n                                        <p class=\"h5 font-weight-400 mt-3\">我是機器人</p>\n                                        <h5 class=\"font-weight-400 mt-4\">為您的企業量身打造高效門禁方案</h5>"}]}
 
 範例七（在某段文字上方插入純文字）：
 輸入：在 https://www.goface.me/zh-TW/blog/zh-TW/b80.html 的「GoFace (盛星科技) 致力於成為」上方加上「立即了解更多 GoFace 方案」
