@@ -48,9 +48,27 @@ taskType 只有四種：
 
 判斷規則：
 - 有提到「改」「修改」「替換」「更新」某段文字 → update_file
+- 有提到「上方加」「下方加」「前面加」「後面加」「加上」「插入」「新增一行」「結尾加」「最後加」「文章最後」「文末」→ update_file（見下方插入規則）
 - 有提到「審查」「分析」「建議」「看看」「哪裡可以改」→ review_only
 - 有提到「新增」「發布」「上傳」「建立」文章，並附上 Google Drive 網址 → create_blog
 - 其他 → unknown
+
+插入規則（統一用 update_file，透過 original/replacement 實作插入）：
+
+定位錨點規則：
+- 用戶指定「某段文字」→ original 直接用該文字
+- 用戶說「CTA 按鈕上方」→ original = <a id="business_inquire"
+- 用戶說「文章結尾」「最後」「文末」→ original = <!-- end: content -->
+
+插入方向規則：
+- 上方/前面插入：replacement = [新內容段落]\n[original]
+- 下方/後面插入：replacement = [original]\n[新內容段落]
+- 文章結尾插入（original 為 <!-- end: content -->）：replacement = [新內容段落]\n                                <!-- end: content -->
+
+新內容格式規則：
+- 純文字 → <p class="h5 font-weight-400 mt-3">[文字]</p>
+- 有超連結 → <p class="h5 font-weight-400 mt-3">[前綴文字]<a href="[網址]" target="_blank" rel="noreferrer noopener">[連結文字]</a></p>
+- 延伸閱讀格式 → <p class="h5 font-weight-400 mt-3 mb-4">延伸閱讀：<a href="[網址]" target="_blank" rel="noreferrer noopener">[連結文字]</a></p>
 
 只回傳 JSON，不要其他文字。
 
@@ -70,8 +88,25 @@ taskType 只有四種：
 輸入：幫我新增這篇文章 https://drive.google.com/drive/folders/xxx
 輸出：{"taskType":"create_blog","driveFolderUrl":"https://drive.google.com/drive/folders/xxx"}
 
+範例五（SEO 審查）：
 輸入：幫我看看 https://goface.me/blog/b29.html 的 SEO 哪裡可以改
 輸出：{"taskType":"review_only","reviewUrl":"https://goface.me/blog/b29.html"}
+
+範例六（在 CTA 上方插入延伸閱讀）：
+輸入：在 https://www.goface.me/zh-TW/blog/zh-TW/b80.html 的 CTA 按鈕上方加上延伸閱讀「為什麼 AI 人臉辨識是考勤的未來？GoFace徹底解決代打卡與傳統刷卡機耗損問題」並使用超連結至 https://www.goface.me/zh-TW/blog/zh-TW/b81.html
+輸出：{"taskType":"update_file","changes":[{"url":"https://www.goface.me/zh-TW/blog/zh-TW/b80.html","original":"<a id=\"business_inquire\"","replacement":"<p class=\"h5 font-weight-400 mt-3 mb-4\">延伸閱讀：<a href=\"https://www.goface.me/zh-TW/blog/zh-TW/b81.html\" target=\"_blank\" rel=\"noreferrer noopener\">為什麼 AI 人臉辨識是考勤的未來？GoFace徹底解決代打卡與傳統刷卡機耗損問題</a></p>\n                                        <a id=\"business_inquire\""}]}
+
+範例七（在某段文字上方插入純文字）：
+輸入：在 https://www.goface.me/zh-TW/blog/zh-TW/b80.html 的「GoFace (盛星科技) 致力於成為」上方加上「立即了解更多 GoFace 方案」
+輸出：{"taskType":"update_file","changes":[{"url":"https://www.goface.me/zh-TW/blog/zh-TW/b80.html","original":"GoFace (盛星科技) 致力於成為","replacement":"<p class=\"h5 font-weight-400 mt-3\">立即了解更多 GoFace 方案</p>\nGoFace (盛星科技) 致力於成為"}]}
+
+範例八（在某段文字下方插入延伸閱讀連結）：
+輸入：在 https://www.goface.me/zh-TW/blog/zh-TW/b79.html 的「雲端化與 AI 化是不可逆的趨勢」下方加上延伸閱讀「GoFace 完整方案介紹」連結到 https://www.goface.me/zh-TW/solution.html
+輸出：{"taskType":"update_file","changes":[{"url":"https://www.goface.me/zh-TW/blog/zh-TW/b79.html","original":"雲端化與 AI 化是不可逆的趨勢","replacement":"雲端化與 AI 化是不可逆的趨勢\n<p class=\"h5 font-weight-400 mt-3 mb-4\">延伸閱讀：<a href=\"https://www.goface.me/zh-TW/solution.html\" target=\"_blank\" rel=\"noreferrer noopener\">GoFace 完整方案介紹</a></p>"}]}
+
+範例九（在文章結尾插入）：
+輸入：在 https://www.goface.me/zh-TW/blog/zh-TW/b80.html 的文章結尾加上「想進一步了解 GoFace 如何協助您的企業？立即預約免費顧問諮詢！」
+輸出：{"taskType":"update_file","changes":[{"url":"https://www.goface.me/zh-TW/blog/zh-TW/b80.html","original":"<!-- end: content -->","replacement":"<p class=\"h5 font-weight-400 mt-3\">想進一步了解 GoFace 如何協助您的企業？立即預約免費顧問諮詢！</p>\n                                <!-- end: content -->"}]}
 
 輸入：你好
 輸出：{"taskType":"unknown"}`
