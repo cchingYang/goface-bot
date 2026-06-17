@@ -4,6 +4,12 @@ function escapeRegExp(str: string): string {
   return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
+// 純文字比對，或剝除 HTML 標籤後比對
+function contentContains(content: string, text: string): boolean {
+  if (content.includes(text)) return true
+  return content.split('\n').some(line => line.replace(/<[^>]+>/g, '').includes(text))
+}
+
 const octokit = new Octokit({
   auth: process.env.GITHUB_TOKEN,
 })
@@ -52,7 +58,7 @@ async function findSrcFile(url: string, original: string): Promise<{ path: strin
   // 先試 src html（去掉語系前綴）
   const srcHtmlPath = `${BASE_PATH}${pathname.replace(/^\/(zh-TW|en-US|ja-JP)\//, '/')}`
   const srcHtmlFile = await fetchFile(srcHtmlPath)
-  if (srcHtmlFile?.content.includes(original)) {
+  if (srcHtmlFile && contentContains(srcHtmlFile.content, original)) {
     return { path: srcHtmlPath, ...srcHtmlFile }
   }
 
@@ -66,7 +72,7 @@ async function findSrcFile(url: string, original: string): Promise<{ path: strin
 
   const langJsonPath = `${BASE_PATH}/lang/${lang}/${pageName}.json`
   const langJsonFile = await fetchFile(langJsonPath)
-  if (langJsonFile?.content.includes(original)) {
+  if (langJsonFile && contentContains(langJsonFile.content, original)) {
     return { path: langJsonPath, ...langJsonFile }
   }
 
@@ -133,10 +139,12 @@ export async function createSEOPullRequest(params: {
         srcContent = srcContent.replace(original, replacement)
         continue
       }
-      // 找不到純文字時，嘗試找包含該文字的整行 HTML 標籤（p、li、h1~h6 等）
-      const tagMatch = srcContent.match(new RegExp(`<(p|li|h[1-6]|span|td|th)[^>]*>[^<]*(?:<[^>]+>[^<]*)*${escapeRegExp(original)}(?:[^<]*<[^>]+>)*[^<]*<\\/\\1>`))
-      if (tagMatch) {
-        srcContent = srcContent.replace(tagMatch[0], replacement)
+      // 找不到純文字時，逐行剝除 HTML 標籤後比對，找到包含該文字的整行就整行替換
+      const lines = srcContent.split('\n')
+      const lineIndex = lines.findIndex(line => line.replace(/<[^>]+>/g, '').includes(original))
+      if (lineIndex !== -1) {
+        lines[lineIndex] = replacement
+        srcContent = lines.join('\n')
         continue
       }
       throw new Error(`找不到原文「${original}」，請確認文字與頁面內容完全一致。`)
