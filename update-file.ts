@@ -117,7 +117,13 @@ export async function createSEOPullRequest(params: {
   changes: Change[]
   slackUser: string
 }): Promise<{ prUrl: string; prNumber: number }> {
-  const { changes, slackUser } = params
+  const { slackUser } = params
+  // Slack Events API 會把 & 編碼成 &amp;，先全部 decode 還原
+  const changes = params.changes.map(c => ({
+    ...c,
+    original: decodeHtmlEntities(c.original),
+    replacement: decodeHtmlEntities(c.replacement),
+  }))
 
   // 依 URL 分組
   const byUrl = new Map<string, Change[]>()
