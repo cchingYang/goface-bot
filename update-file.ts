@@ -4,10 +4,38 @@ function escapeRegExp(str: string): string {
   return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
-// 純文字比對，或剝除 HTML 標籤後比對
+function decodeHtmlEntities(s: string): string {
+  return s.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&nbsp;/g, ' ').replace(/&quot;/g, '"').replace(/&#39;/g, "'")
+}
+
+function stripTags(line: string): string {
+  return decodeHtmlEntities(line.replace(/<[^>]+>/g, '')).replace(/\s+/g, ' ').trim()
+}
+
+function normalizeText(s: string): string {
+  return s.replace(/\s+/g, ' ').trim()
+}
+
+// 用於「找行」的比對：把空白全部移除後再比對，避免 tag 內尾部空白造成不一致
+function collapseSpaces(s: string): string {
+  return s.replace(/\s/g, '')
+}
+
+// 若插入的新內容是純文字（無 HTML tag），且目標行是 <p> 開頭，自動包上 <p></p>
+function wrapIfNeeded(newContent: string, targetLine: string): string {
+  if (/<[^>]+>/.test(newContent)) return newContent
+  if (/^\s*<p[\s>]/i.test(targetLine)) {
+    const indent = targetLine.match(/^(\s*)/)?.[1] ?? ''
+    return `${indent}<p>${newContent}</p>`
+  }
+  return newContent
+}
+
+// 純文字比對，或剝除 HTML 標籤後比對（空白全移除後比對，避免 tag 邊界空白問題）
 function contentContains(content: string, text: string): boolean {
   if (content.includes(text)) return true
-  return content.split('\n').some(line => line.replace(/<[^>]+>/g, '').includes(text))
+  const needle = collapseSpaces(text)
+  return content.split('\n').some(line => collapseSpaces(stripTags(line)).includes(needle))
 }
 
 const octokit = new Octokit({
@@ -145,7 +173,8 @@ export async function createSEOPullRequest(params: {
           const lines = srcContent.split('\n')
           const lineIndex = lines.findIndex(line => line.includes(original))
           if (lineIndex !== -1) {
-            const newContent = replacement.slice(isInsertAfter ? original.length : 0, isInsertAfter ? undefined : -original.length).trimStart()
+            const rawContent = replacement.slice(isInsertAfter ? original.length : 0, isInsertAfter ? undefined : -original.length).trimStart()
+            const newContent = wrapIfNeeded(rawContent, lines[lineIndex])
             lines[lineIndex] = isInsertAfter
               ? lines[lineIndex] + '\n' + newContent
               : newContent + '\n' + lines[lineIndex]
@@ -158,13 +187,14 @@ export async function createSEOPullRequest(params: {
       }
       // 找不到純文字時，逐行剝除 HTML 標籤後比對，找到包含該文字的整行就整行前後插入或替換
       const lines = srcContent.split('\n')
-      const lineIndex = lines.findIndex(line => line.replace(/<[^>]+>/g, '').includes(original))
+      const needle = collapseSpaces(original)
+      const lineIndex = lines.findIndex(line => collapseSpaces(stripTags(line)).includes(needle))
       if (lineIndex !== -1) {
         if (isInsertAfter) {
-          const newContent = replacement.slice(original.length).trimStart()
+          const newContent = wrapIfNeeded(replacement.slice(original.length).trimStart(), lines[lineIndex])
           lines[lineIndex] = lines[lineIndex] + '\n' + newContent
         } else if (isInsertBefore) {
-          const newContent = replacement.slice(0, -original.length).trimEnd()
+          const newContent = wrapIfNeeded(replacement.slice(0, -original.length).trimEnd(), lines[lineIndex])
           lines[lineIndex] = newContent + '\n' + lines[lineIndex]
         } else {
           lines[lineIndex] = replacement

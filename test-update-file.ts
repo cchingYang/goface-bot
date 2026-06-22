@@ -7,18 +7,9 @@ const testCases = [
   {
     changes: [
       {
-        url: 'https://www.goface.me/zh-TW/checkin.html',
-        original: 'AI 打卡｜人臉辨識出勤更精準、更快速',
-        replacement: 'HR 打卡｜人臉辨識出勤更精準、更快速',
-      },
-    ],
-  },
-  {
-    changes: [
-      {
         url: 'https://www.goface.me/zh-TW/blog/zh-TW/b80.html',
-        original: '2026 企業雲端門禁考勤系統選購指南：提升管理效率的 5 大關鍵',
-        replacement: '2027 企業雲端門禁考勤系統選購指南：提升管理效率的 7 大關鍵',
+        original: '雲端門禁考勤系統（Cloud-Based Access Control & Attendance System）是一種基於 SaaS架構的解決方案。',
+        replacement: '隨著數位轉型普及，現代雲端考勤系統已成為企業不可或缺的管理工具。雲端門禁考勤系統（Cloud-Based Access Control & Attendance System）是一種基於 SaaS架構的解決方案。',
       },
     ],
   },
