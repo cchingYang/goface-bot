@@ -65,6 +65,16 @@ function metaTagPatterns(field: 'title' | 'description', oldText: string): RegEx
   ]
 }
 
+// 沒有標籤（或標籤寫在引號外面，parser 沒抓進 original）時的備援判斷：
+// 只要 original 剛好等於目前整個 <title>/<meta description> 的內容，就視為在改該欄位，
+// 避免落回一般文字取代（只替換第一個出現位置，導致 og:title/og:description 沒同步更新）
+function detectMetaFieldFromContent(content: string, original: string): 'title' | 'description' | null {
+  const escaped = escapeRegExp(original)
+  if (new RegExp(`<title>${escaped}</title>`).test(content)) return 'title'
+  if (new RegExp(`<meta\\s+name="description"\\s+content="${escaped}"\\s*/?>`).test(content)) return 'description'
+  return null
+}
+
 function applyMetaFieldChange(content: string, field: 'title' | 'description', oldText: string, newText: string): { content: string; matched: boolean } {
   const safeNewText = newText.replace(/\$/g, '$$$$')
   let result = content
@@ -223,7 +233,8 @@ export async function createSEOPullRequest(params: {
 
     // 套用所有替換
     let srcContent = srcFile.content
-    for (const { original, replacement, metaField } of urlChanges) {
+    for (const { original, replacement, metaField: labeledMetaField } of urlChanges) {
+      const metaField = labeledMetaField ?? detectMetaFieldFromContent(srcContent, original)
       if (metaField) {
         const { content: updated, matched } = applyMetaFieldChange(srcContent, metaField, original, replacement)
         if (!matched) {
