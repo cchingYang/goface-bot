@@ -38,6 +38,46 @@ function contentContains(content: string, text: string): boolean {
   return content.split('\n').some(line => collapseSpaces(stripTags(line)).includes(needle))
 }
 
+// 使用者常用「Meta Title：」「Meta Description：」標註要改哪個欄位，
+// 但這個標籤本身不會出現在頁面原始碼裡，需剝除後才能比對
+const META_LABEL_RE = /^\s*Meta\s*(Title|Description)\s*[:：]\s*/i
+
+function extractMetaField(text: string): { field: 'title' | 'description'; text: string } | null {
+  const m = text.match(META_LABEL_RE)
+  if (!m) return null
+  const field = m[1].toLowerCase() === 'title' ? 'title' : 'description'
+  return { field, text: text.slice(m[0].length) }
+}
+
+// title/description 在建立文章時會同時填入 <title>/og:title 或 description/og:description，
+// 兩處內容相同，所以修改時兩處都要一起更新，避免 SEO 標籤互相不一致
+function metaTagPatterns(field: 'title' | 'description', oldText: string): RegExp[] {
+  const escaped = escapeRegExp(oldText)
+  if (field === 'title') {
+    return [
+      new RegExp(`(<title>)${escaped}(</title>)`),
+      new RegExp(`(<meta\\s+property="og:title"\\s+content=")${escaped}("\\s*/?>)`),
+    ]
+  }
+  return [
+    new RegExp(`(<meta\\s+name="description"\\s+content=")${escaped}("\\s*/?>)`),
+    new RegExp(`(<meta\\s+property="og:description"\\s+content=")${escaped}("\\s*/?>)`),
+  ]
+}
+
+function applyMetaFieldChange(content: string, field: 'title' | 'description', oldText: string, newText: string): { content: string; matched: boolean } {
+  const safeNewText = newText.replace(/\$/g, '$$$$')
+  let result = content
+  let matched = false
+  for (const pattern of metaTagPatterns(field, oldText)) {
+    if (pattern.test(result)) {
+      result = result.replace(pattern, `$1${safeNewText}$2`)
+      matched = true
+    }
+  }
+  return { content: result, matched }
+}
+
 const octokit = new Octokit({
   auth: process.env.GITHUB_TOKEN,
 })
@@ -111,6 +151,7 @@ export interface Change {
   url: string
   original: string
   replacement: string
+  metaField?: 'title' | 'description'
 }
 
 export async function createSEOPullRequest(params: {
@@ -125,9 +166,23 @@ export async function createSEOPullRequest(params: {
     replacement: decodeHtmlEntities(c.replacement),
   }))
 
+  // 剝除「Meta Title：」「Meta Description：」標籤前綴，標記 metaField，
+  // 讓比對邏輯改用 <title>/<meta> 標籤定向比對，而不是整份原始碼的文字搜尋
+  const changesWithMeta: Change[] = changes.map(c => {
+    const originalMeta = extractMetaField(c.original)
+    if (!originalMeta) return c
+    const replacementMeta = extractMetaField(c.replacement)
+    return {
+      ...c,
+      metaField: originalMeta.field,
+      original: originalMeta.text,
+      replacement: replacementMeta ? replacementMeta.text : c.replacement,
+    }
+  })
+
   // 依 URL 分組
   const byUrl = new Map<string, Change[]>()
-  for (const change of changes) {
+  for (const change of changesWithMeta) {
     if (!byUrl.has(change.url)) byUrl.set(change.url, [])
     byUrl.get(change.url)!.push(change)
   }
@@ -168,7 +223,17 @@ export async function createSEOPullRequest(params: {
 
     // 套用所有替換
     let srcContent = srcFile.content
-    for (const { original, replacement } of urlChanges) {
+    for (const { original, replacement, metaField } of urlChanges) {
+      if (metaField) {
+        const { content: updated, matched } = applyMetaFieldChange(srcContent, metaField, original, replacement)
+        if (!matched) {
+          const fieldLabel = metaField === 'title' ? 'Meta Title' : 'Meta Description'
+          throw new Error(`找不到 ${fieldLabel} 原文「${original}」，請確認文字與頁面 <title>/<meta> 標籤內容完全一致。`)
+        }
+        srcContent = updated
+        continue
+      }
+
       // 判斷插入方向：replacement 以 original 開頭 → 下方插入；以 original 結尾 → 上方插入；否則是純替換
       const isInsertAfter = replacement.startsWith(original)
       const isInsertBefore = !isInsertAfter && replacement.endsWith(original)
