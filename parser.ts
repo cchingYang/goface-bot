@@ -10,6 +10,8 @@ export interface FileChange {
   url: string
   original: string
   replacement: string
+  // 只有「插入新內容」才需要這個欄位；單純改寫/取代（即使新文字整段包住原文）絕對不要加
+  action?: 'insertBefore' | 'insertAfter'
 }
 
 export interface ParsedRequest {
@@ -47,25 +49,30 @@ taskType 只有四種：
 4. "unknown" — 無法判斷，或不屬於以上任務
 
 判斷規則：
-- 有提到「改」「修改」「替換」「更新」某段文字 → update_file
-- 有提到「刪除」「移除」「拿掉」「去掉」某段文字 → update_file（replacement 設為空字串 ""）
-- 有提到「上方加」「下方加」「前面加」「後面加」「加上」「插入」「新增一行」「結尾加」「最後加」「文章最後」「文末」→ update_file（見下方插入規則）
+- 有提到「改」「修改」「替換」「更新」某段文字 → update_file，**不要加 action 欄位**（單純取代 original 整段文字，就算新文字整段包住原文、只是在前面或後面多加一句話，也是單純取代，不是插入，絕對不要加 action）
+- 有提到「刪除」「移除」「拿掉」「去掉」某段文字 → update_file（replacement 設為空字串 ""，不要加 action 欄位）
+- 有提到「上方加」「下方加」「前面加」「後面加」「加上」「插入」「新增一行」「結尾加」「最後加」「文章最後」「文末」→ update_file（見下方插入規則，一定要加 action 欄位）
 - 有提到「審查」「分析」「建議」「看看」「哪裡可以改」→ review_only
 - 有提到「新增」「發布」「上傳」「建立」文章，並附上 Google Drive 網址 → create_blog
 - 其他 → unknown
 
-插入規則（統一用 update_file，透過 original/replacement 實作插入）：
+action 欄位規則（只有「插入」才需要，用來讓程式知道這是插入而不是取代，不能靠字串本身判斷）：
+- 「上方」「前面」插入 → action = "insertBefore"
+- 「下方」「後面」「結尾」「最後」「文末」插入 → action = "insertAfter"
+- 單純改寫／取代／刪除 → 完全不要出現 action 欄位
+
+插入規則（統一用 update_file，透過 original/replacement/action 實作插入）：
 
 定位錨點規則：
 - 用戶指定「某段文字」→ original 直接用該文字
-- 用戶說「CTA 按鈕上方」→ original = <a id="business_inquire"，replacement = [新內容段落]\n                                        <a id="business_inquire"
-- 用戶說「CTA 按鈕下方」→ original = </a>\n                                        <h5 class="font-weight-400 mt-4">為您的企業量身打造高效門禁方案</h5>，replacement = </a>\n                                        [新內容段落]\n                                        <h5 class="font-weight-400 mt-4">為您的企業量身打造高效門禁方案</h5>
-- 用戶說「文章結尾」「最後」「文末」→ original = <!-- end: content -->
+- 用戶說「CTA 按鈕上方」→ original = <a id="business_inquire"，action = "insertBefore"，replacement = [新內容段落]\n                                        <a id="business_inquire"
+- 用戶說「CTA 按鈕下方」→ original = </a>\n                                        <h5 class="font-weight-400 mt-4">為您的企業量身打造高效門禁方案</h5>，action = "insertAfter"，replacement = </a>\n                                        [新內容段落]\n                                        <h5 class="font-weight-400 mt-4">為您的企業量身打造高效門禁方案</h5>
+- 用戶說「文章結尾」「最後」「文末」→ original = <!-- end: content -->，action = "insertBefore"（新內容要插在結尾標記之前，所以是 insertBefore，不是 insertAfter，別被「結尾」字面意思誤導）
 
 插入方向規則（非 CTA 錨點）：
-- 上方/前面插入：replacement = [新內容段落]\n[original]
-- 下方/後面插入：replacement = [original]\n[新內容段落]
-- 文章結尾插入（original 為 <!-- end: content -->）：replacement = [新內容段落]\n                                <!-- end: content -->
+- 上方/前面插入：action = "insertBefore"，replacement = [新內容段落]\n[original]
+- 下方/後面插入：action = "insertAfter"，replacement = [original]\n[新內容段落]
+- 文章結尾插入（original 為 <!-- end: content -->）：action = "insertBefore"，replacement = [新內容段落]\n                                <!-- end: content -->
 
 新內容格式規則：
 - 純文字 → <p>[文字]</p>
@@ -96,23 +103,27 @@ taskType 只有四種：
 
 範例六（在 CTA 上方插入延伸閱讀）：
 輸入：在 https://www.goface.me/zh-TW/blog/zh-TW/b80.html 的 CTA 按鈕上方加上延伸閱讀「為什麼 AI 人臉辨識是考勤的未來？GoFace徹底解決代打卡與傳統刷卡機耗損問題」並使用超連結至 https://www.goface.me/zh-TW/blog/zh-TW/b81.html
-輸出：{"taskType":"update_file","changes":[{"url":"https://www.goface.me/zh-TW/blog/zh-TW/b80.html","original":"<a id=\"business_inquire\"","replacement":"<p>延伸閱讀：<a href=\"https://www.goface.me/zh-TW/blog/zh-TW/b81.html\" target=\"_blank\" rel=\"noreferrer noopener\">為什麼 AI 人臉辨識是考勤的未來？GoFace徹底解決代打卡與傳統刷卡機耗損問題</a></p>\n                                        <a id=\"business_inquire\""}]}
+輸出：{"taskType":"update_file","changes":[{"url":"https://www.goface.me/zh-TW/blog/zh-TW/b80.html","original":"<a id=\"business_inquire\"","action":"insertBefore","replacement":"<p>延伸閱讀：<a href=\"https://www.goface.me/zh-TW/blog/zh-TW/b81.html\" target=\"_blank\" rel=\"noreferrer noopener\">為什麼 AI 人臉辨識是考勤的未來？GoFace徹底解決代打卡與傳統刷卡機耗損問題</a></p>\n                                        <a id=\"business_inquire\""}]}
 
 範例六-b（在 CTA 按鈕下方插入純文字）：
 輸入：在 https://www.goface.me/zh-TW/blog/zh-TW/b80.html 的 CTA 按鈕下方加上「我是機器人」
-輸出：{"taskType":"update_file","changes":[{"url":"https://www.goface.me/zh-TW/blog/zh-TW/b80.html","original":"</a>\n                                        <h5 class=\"font-weight-400 mt-4\">為您的企業量身打造高效門禁方案</h5>","replacement":"</a>\n                                        <p>我是機器人</p>\n                                        <h5 class=\"font-weight-400 mt-4\">為您的企業量身打造高效門禁方案</h5>"}]}
+輸出：{"taskType":"update_file","changes":[{"url":"https://www.goface.me/zh-TW/blog/zh-TW/b80.html","original":"</a>\n                                        <h5 class=\"font-weight-400 mt-4\">為您的企業量身打造高效門禁方案</h5>","action":"insertAfter","replacement":"</a>\n                                        <p>我是機器人</p>\n                                        <h5 class=\"font-weight-400 mt-4\">為您的企業量身打造高效門禁方案</h5>"}]}
 
 範例七（在某段文字上方插入純文字）：
 輸入：在 https://www.goface.me/zh-TW/blog/zh-TW/b80.html 的「GoFace (盛星科技) 致力於成為」上方加上「立即了解更多 GoFace 方案」
-輸出：{"taskType":"update_file","changes":[{"url":"https://www.goface.me/zh-TW/blog/zh-TW/b80.html","original":"GoFace (盛星科技) 致力於成為","replacement":"<p>立即了解更多 GoFace 方案</p>\nGoFace (盛星科技) 致力於成為"}]}
+輸出：{"taskType":"update_file","changes":[{"url":"https://www.goface.me/zh-TW/blog/zh-TW/b80.html","original":"GoFace (盛星科技) 致力於成為","action":"insertBefore","replacement":"<p>立即了解更多 GoFace 方案</p>\nGoFace (盛星科技) 致力於成為"}]}
 
 範例八（在某段文字下方插入延伸閱讀連結）：
 輸入：在 https://www.goface.me/zh-TW/blog/zh-TW/b79.html 的「雲端化與 AI 化是不可逆的趨勢」下方加上延伸閱讀「GoFace 完整方案介紹」連結到 https://www.goface.me/zh-TW/solution.html
-輸出：{"taskType":"update_file","changes":[{"url":"https://www.goface.me/zh-TW/blog/zh-TW/b79.html","original":"雲端化與 AI 化是不可逆的趨勢","replacement":"雲端化與 AI 化是不可逆的趨勢\n<p>延伸閱讀：<a href=\"https://www.goface.me/zh-TW/solution.html\" target=\"_blank\" rel=\"noreferrer noopener\">GoFace 完整方案介紹</a></p>"}]}
+輸出：{"taskType":"update_file","changes":[{"url":"https://www.goface.me/zh-TW/blog/zh-TW/b79.html","original":"雲端化與 AI 化是不可逆的趨勢","action":"insertAfter","replacement":"雲端化與 AI 化是不可逆的趨勢\n<p>延伸閱讀：<a href=\"https://www.goface.me/zh-TW/solution.html\" target=\"_blank\" rel=\"noreferrer noopener\">GoFace 完整方案介紹</a></p>"}]}
 
 範例九（在文章結尾插入）：
 輸入：在 https://www.goface.me/zh-TW/blog/zh-TW/b80.html 的文章結尾加上「想進一步了解 GoFace 如何協助您的企業？立即預約免費顧問諮詢！」
-輸出：{"taskType":"update_file","changes":[{"url":"https://www.goface.me/zh-TW/blog/zh-TW/b80.html","original":"<!-- end: content -->","replacement":"<p>想進一步了解 GoFace 如何協助您的企業？立即預約免費顧問諮詢！</p>\n                                <!-- end: content -->"}]}
+輸出：{"taskType":"update_file","changes":[{"url":"https://www.goface.me/zh-TW/blog/zh-TW/b80.html","original":"<!-- end: content -->","action":"insertBefore","replacement":"<p>想進一步了解 GoFace 如何協助您的企業？立即預約免費顧問諮詢！</p>\n                                <!-- end: content -->"}]}
+
+範例九-b（單純改寫句子，新文字整段包住原文——這是「改」不是「插入」，絕對不要加 action）：
+輸入：幫我改 https://www.goface.me/zh-TW/blog/zh-TW/b60.html 的「無需實體票券，完全消除黃牛轉售問題。」改成「這種創新的人臉票模式無需實體票券，完全消除黃牛轉售問題。」
+輸出：{"taskType":"update_file","changes":[{"url":"https://www.goface.me/zh-TW/blog/zh-TW/b60.html","original":"無需實體票券，完全消除黃牛轉售問題。","replacement":"這種創新的人臉票模式無需實體票券，完全消除黃牛轉售問題。"}]}
 
 範例十（刪除某段文字）：
 輸入：刪除 https://www.goface.me/zh-TW/blog/zh-TW/b80.html 的「我是機器人愛吃蘋果蘋果。」

@@ -162,6 +162,9 @@ export interface Change {
   original: string
   replacement: string
   metaField?: 'title' | 'description'
+  // 由 parser.ts 依使用者用的動詞（加上/插入 vs 改成）明確指定，不要用字串頭尾去猜，
+  // 否則「新文字整段包住原文」的單純改寫會被誤判成插入
+  action?: 'insertBefore' | 'insertAfter'
 }
 
 export async function createSEOPullRequest(params: {
@@ -233,7 +236,7 @@ export async function createSEOPullRequest(params: {
 
     // 套用所有替換
     let srcContent = srcFile.content
-    for (const { original, replacement, metaField: labeledMetaField } of urlChanges) {
+    for (const { original, replacement, metaField: labeledMetaField, action } of urlChanges) {
       const metaField = labeledMetaField ?? detectMetaFieldFromContent(srcContent, original)
       if (metaField) {
         const { content: updated, matched } = applyMetaFieldChange(srcContent, metaField, original, replacement)
@@ -245,9 +248,11 @@ export async function createSEOPullRequest(params: {
         continue
       }
 
-      // 判斷插入方向：replacement 以 original 開頭 → 下方插入；以 original 結尾 → 上方插入；否則是純替換
-      const isInsertAfter = replacement.startsWith(original)
-      const isInsertBefore = !isInsertAfter && replacement.endsWith(original)
+      // 插入方向由 parser.ts 依使用者的動詞明確指定（action），不要單靠 replacement 是否以
+      // original 開頭/結尾去猜——單純改寫句子時，新文字也可能剛好整段包住原文。
+      // 同時仍檢查字串形狀是否吻合，避免 action 標錯或內容不符預期格式時誤觸插入邏輯
+      const isInsertAfter = action === 'insertAfter' && replacement.startsWith(original)
+      const isInsertBefore = action === 'insertBefore' && replacement.endsWith(original)
 
       if (srcContent.includes(original)) {
         if (isInsertAfter || isInsertBefore) {
@@ -264,7 +269,9 @@ export async function createSEOPullRequest(params: {
             continue
           }
         }
-        srcContent = srcContent.replace(original, replacement)
+        // 換掉所有出現位置：同一段文字常同時出現在目錄錨點與內文標題（或其他重複引用處），
+        // 只換第一個會讓目錄跟內文標題不同步
+        srcContent = srcContent.split(original).join(replacement)
         continue
       }
       // 找不到純文字時，逐行剝除 HTML 標籤後比對，找到包含該文字的整行就整行前後插入或替換
