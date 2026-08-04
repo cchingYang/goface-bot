@@ -1,4 +1,5 @@
 import { Octokit } from '@octokit/rest'
+import { emojify } from 'node-emoji'
 
 function escapeRegExp(str: string): string {
   return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
@@ -172,11 +173,13 @@ export async function createSEOPullRequest(params: {
   slackUser: string
 }): Promise<{ prUrl: string; prNumber: number }> {
   const { slackUser } = params
-  // Slack Events API 會把 & 編碼成 &amp;，先全部 decode 還原
+  // Slack Events API 會把 & 編碼成 &amp;，先全部 decode 還原；
+  // 使用者輸入的 emoji shortcode（如 :point_right:）如果 Slack 沒有自動轉換成 unicode，
+  // 也要在這裡轉換，避免 shortcode 原文字串直接被寫進頁面
   const changes = params.changes.map(c => ({
     ...c,
-    original: decodeHtmlEntities(c.original),
-    replacement: decodeHtmlEntities(c.replacement),
+    original: emojify(decodeHtmlEntities(c.original)),
+    replacement: emojify(decodeHtmlEntities(c.replacement)),
   }))
 
   // 剝除「Meta Title：」「Meta Description：」標籤前綴，標記 metaField，
