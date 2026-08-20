@@ -51,18 +51,20 @@ function extractMetaField(text: string): { field: 'title' | 'description'; text:
 }
 
 // title/description 在建立文章時會同時填入 <title>/og:title 或 description/og:description，
-// 兩處內容相同，所以修改時兩處都要一起更新，避免 SEO 標籤互相不一致
+// 兩處內容相同，所以修改時兩處都要一起更新，避免 SEO 標籤互相不一致。
+// 文字與右引號中間允許有空白/換行（\s*）：舊文章曾出現 content="文字\n"> 這種夾帶換行的寫法，
+// 取代時一併吃掉，順便清成單行乾淨格式
 function metaTagPatterns(field: 'title' | 'description', oldText: string): RegExp[] {
   const escaped = escapeRegExp(oldText)
   if (field === 'title') {
     return [
-      new RegExp(`(<title>)${escaped}(</title>)`),
-      new RegExp(`(<meta\\s+property="og:title"\\s+content=")${escaped}("\\s*/?>)`),
+      new RegExp(`(<title>)${escaped}\\s*(</title>)`),
+      new RegExp(`(<meta\\s+property="og:title"\\s+content=")${escaped}\\s*("\\s*/?>)`),
     ]
   }
   return [
-    new RegExp(`(<meta\\s+name="description"\\s+content=")${escaped}("\\s*/?>)`),
-    new RegExp(`(<meta\\s+property="og:description"\\s+content=")${escaped}("\\s*/?>)`),
+    new RegExp(`(<meta\\s+name="description"\\s+content=")${escaped}\\s*("\\s*/?>)`),
+    new RegExp(`(<meta\\s+property="og:description"\\s+content=")${escaped}\\s*("\\s*/?>)`),
   ]
 }
 
@@ -71,8 +73,8 @@ function metaTagPatterns(field: 'title' | 'description', oldText: string): RegEx
 // 避免落回一般文字取代（只替換第一個出現位置，導致 og:title/og:description 沒同步更新）
 function detectMetaFieldFromContent(content: string, original: string): 'title' | 'description' | null {
   const escaped = escapeRegExp(original)
-  if (new RegExp(`<title>${escaped}</title>`).test(content)) return 'title'
-  if (new RegExp(`<meta\\s+name="description"\\s+content="${escaped}"\\s*/?>`).test(content)) return 'description'
+  if (new RegExp(`<title>${escaped}\\s*</title>`).test(content)) return 'title'
+  if (new RegExp(`<meta\\s+name="description"\\s+content="${escaped}\\s*"\\s*/?>`).test(content)) return 'description'
   return null
 }
 
@@ -239,12 +241,36 @@ export async function createSEOPullRequest(params: {
 
     // 套用所有替換
     let srcContent = srcFile.content
-    for (const { original, replacement, metaField: labeledMetaField, action } of urlChanges) {
-      const metaField = labeledMetaField ?? detectMetaFieldFromContent(srcContent, original)
-      if (metaField) {
-        const { content: updated, matched } = applyMetaFieldChange(srcContent, metaField, original, replacement)
+
+    // 明確標記 Meta Title/Description（extractMetaField 剝出來的 metaField）的修改一律優先處理，
+    // 且只鎖定 <title>/<meta> 標籤範圍替換。
+    // 原因：同一段文字常常同時被當作可見段落與 meta 內容（SEO 慣例），若先跑一般文字取代，
+    // 會用 split/join 把「所有」出現這段文字的地方都換掉（包括 meta 標籤），
+    // 導致後面才處理的 meta 修改因原文已經被換掉而找不到、誤判為失敗。
+    // 分組只看「明確標記」，不能用 detectMetaFieldFromContent 自動判斷來分組——
+    // 若段落文字剛好與 meta 內容一模一樣，會連沒標記的段落修改也一起誤判成 meta 修改，
+    // 導致段落本身永遠沒被換到。自動判斷留給下面第二輪、用當時最新的內容評估即可。
+    const metaChanges = urlChanges.filter(c => c.metaField)
+    const otherChanges = urlChanges.filter(c => !c.metaField)
+
+    for (const { original, replacement, metaField } of metaChanges) {
+      const { content: updated, matched } = applyMetaFieldChange(srcContent, metaField!, original, replacement)
+      if (!matched) {
+        const fieldLabel = metaField === 'title' ? 'Meta Title' : 'Meta Description'
+        throw new Error(`找不到 ${fieldLabel} 原文「${original}」，請確認文字與頁面 <title>/<meta> 標籤內容完全一致。`)
+      }
+      srcContent = updated
+    }
+
+    for (const { original, replacement, action } of otherChanges) {
+      // 沒有明確標記的修改，仍用內容自動判斷是否其實是在改 meta 欄位（見 detectMetaFieldFromContent）。
+      // 用「目前」的 srcContent 判斷：若上面那輪已經把 meta 標籤換成新文字，這裡就不會再誤判，
+      // 能正確落回一般文字取代，改到可見段落
+      const autoMetaField = detectMetaFieldFromContent(srcContent, original)
+      if (autoMetaField) {
+        const { content: updated, matched } = applyMetaFieldChange(srcContent, autoMetaField, original, replacement)
         if (!matched) {
-          const fieldLabel = metaField === 'title' ? 'Meta Title' : 'Meta Description'
+          const fieldLabel = autoMetaField === 'title' ? 'Meta Title' : 'Meta Description'
           throw new Error(`找不到 ${fieldLabel} 原文「${original}」，請確認文字與頁面 <title>/<meta> 標籤內容完全一致。`)
         }
         srcContent = updated
