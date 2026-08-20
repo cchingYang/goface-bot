@@ -51,7 +51,7 @@
 2. 右上角 toggle 打開 **「Enable Events」**
 3. 在 **Request URL** 填入：
    ```
-   https://goface-bot.vercel.app/api/slack/events
+   https://goface-bot-theta.vercel.app/api/slack/events
    ```
 4. 等出現 ✅ **Verified** 字樣
 5. 往下找 **「Subscribe to bot events」**
